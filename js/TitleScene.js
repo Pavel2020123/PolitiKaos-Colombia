@@ -15,25 +15,17 @@ export default class TitleScene extends Phaser.Scene {
     this.transitioning = false;
     this.drawBackground();
 
-    const glow = this.add.text(640, 230, 'POLITIKAOS', {
+    this.add.rectangle(640, 264, 900, 132, 0x080d1b, 0.72)
+      .setStrokeStyle(5, 0x4bc6ff, 0.8);
+    const glow = this.add.text(640, 260, 'GUACHAFITA STRIKE', {
       fontFamily: 'Trebuchet MS, Arial',
-      fontSize: '68px',
+      fontSize: '66px',
       fontStyle: 'bold italic',
       color: '#ffe357',
       stroke: '#ff315f',
       strokeThickness: 10,
       shadow: { color: '#ff315f', blur: 22, fill: true }
     }).setOrigin(0.5).setAngle(-2);
-
-    this.add.text(640, 300, 'COLOMBIA', {
-      fontFamily: 'Trebuchet MS, Arial',
-      fontSize: '31px',
-      fontStyle: 'bold',
-      color: '#4bc6ff',
-      stroke: '#07101e',
-      strokeThickness: 6,
-      letterSpacing: 12
-    }).setOrigin(0.5);
 
     this.add.text(640, 350, 'EL DEBATE SE CONVIERTE EN COMBATE', {
       fontFamily: 'Consolas, monospace', fontSize: '11px', color: '#b8c7df', letterSpacing: 3
