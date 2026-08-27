@@ -37,7 +37,6 @@ export default class StageSelectScene extends Phaser.Scene {
     if (!this.cache.audio.exists('bgm_menu')) this.load.audio('bgm_menu', 'assets/audio/bgm_menu.mp3');
     if (!this.cache.audio.exists('sfx_hover')) this.load.audio('sfx_hover', 'assets/audio/sfx_hover.wav');
     if (!this.cache.audio.exists('sfx_select')) this.load.audio('sfx_select', 'assets/audio/sfx_select.mp3');
-    if (!this.cache.audio.exists('sfx_fight')) this.load.audio('sfx_fight', 'assets/audio/sfx_fight.flac');
   }
 
   create() {
@@ -294,7 +293,7 @@ export default class StageSelectScene extends Phaser.Scene {
     this.transitioning = true;
     this.registry.set('selectedStage', selectedStage);
     this.registry.set('selectedStageId', selectedStage.id);
-    this.playOneShot('sfx_fight', 0.95);
+    this.playOneShot('sfx_select', 0.85);
     this.stopMenuMusic();
     this.stageNameText.setText(`ARENA: ${selectedStage.name.toUpperCase()}`).setColor('#5eff9d');
     this.cameras.main.fadeOut(300, 3, 6, 13);

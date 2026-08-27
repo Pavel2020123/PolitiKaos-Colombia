@@ -1,4 +1,4 @@
-import { ACTIVE_CHARACTERS, CHARACTER_BY_ID } from './data/characters.js';
+import { ACTIVE_CHARACTERS, CHARACTER_BY_ID, preloadCharacterAssets } from './data/characters.js';
 
 export default class VersusScene extends Phaser.Scene {
   constructor() {
@@ -14,14 +14,7 @@ export default class VersusScene extends Phaser.Scene {
   }
 
   preload() {
-    [this.player1, this.player2].forEach(character => {
-      if (character.selectionAsset && !this.textures.exists(character.texture)) {
-        this.load.image(character.texture, character.selectionAsset);
-      }
-      if (character.headAsset && !this.textures.exists(character.headTexture)) {
-        this.load.image(character.headTexture, character.headAsset);
-      }
-    });
+    preloadCharacterAssets(this, [this.player1, this.player2]);
   }
 
   create() {
@@ -34,8 +27,8 @@ export default class VersusScene extends Phaser.Scene {
       .setStrokeStyle(5, this.player1.color || 0x69bfff, 1);
     const rightPanel = this.add.rectangle(1520, 360, 490, 520, 0x421527, 0.96)
       .setStrokeStyle(5, this.player2.color || 0xff526f, 1);
-    const leftPortrait = this.add.image(-240, 305, this.player1.texture);
-    const rightPortrait = this.add.image(1520, 305, this.player2.texture).setFlipX(true);
+    const leftPortrait = this.add.image(-240, 305, this.player1.portrait);
+    const rightPortrait = this.add.image(1520, 305, this.player2.portrait).setFlipX(true);
     this.scaleToFit(leftPortrait, 410, 320);
     this.scaleToFit(rightPortrait, 410, 320);
 
@@ -123,7 +116,7 @@ export default class VersusScene extends Phaser.Scene {
   }
 
   ensureFallbackTexture(character) {
-    [character.texture, character.headTexture].forEach(textureKey => {
+    [character.portrait, character.headSprite].forEach(textureKey => {
       if (this.textures.exists(textureKey)) return;
       const g = this.add.graphics();
       g.fillStyle(0x101827, 1);

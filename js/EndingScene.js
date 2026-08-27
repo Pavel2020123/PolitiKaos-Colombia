@@ -1,4 +1,4 @@
-import { ACTIVE_CHARACTERS, CHARACTER_BY_ID } from './data/characters.js';
+import { ACTIVE_CHARACTERS, CHARACTER_BY_ID, preloadCharacterAssets } from './data/characters.js';
 
 export default class EndingScene extends Phaser.Scene {
   constructor() {
@@ -12,12 +12,7 @@ export default class EndingScene extends Phaser.Scene {
   }
 
   preload() {
-    if (this.champion.selectionAsset && !this.textures.exists(this.champion.texture)) {
-      this.load.image(this.champion.texture, this.champion.selectionAsset);
-    }
-    if (this.champion.headAsset && !this.textures.exists(this.champion.headTexture)) {
-      this.load.image(this.champion.headTexture, this.champion.headAsset);
-    }
+    preloadCharacterAssets(this, [this.champion]);
   }
 
   create() {
@@ -35,9 +30,9 @@ export default class EndingScene extends Phaser.Scene {
     const portraitPanel = this.add.rectangle(285, 357, 430, 510, 0x0b1426, 0.94)
       .setStrokeStyle(5, this.champion.color || 0xffd23f, 1)
       .setDepth(5);
-    const portraitTexture = this.textures.exists(this.champion.texture)
-      ? this.champion.texture
-      : this.champion.headTexture;
+    const portraitTexture = this.textures.exists(this.champion.portrait)
+      ? this.champion.portrait
+      : this.champion.headSprite;
     const portrait = this.add.image(285, 330, portraitTexture).setDepth(6);
     this.scaleToFit(portrait, 370, 390);
     this.add.text(285, 565, this.champion.name.toUpperCase(), {
@@ -143,7 +138,7 @@ export default class EndingScene extends Phaser.Scene {
   }
 
   ensureFallbackTexture() {
-    [this.champion.texture, this.champion.headTexture].forEach(textureKey => {
+    [this.champion.portrait, this.champion.headSprite].forEach(textureKey => {
       if (this.textures.exists(textureKey)) return;
       const g = this.add.graphics();
       g.fillStyle(0x101827, 1);

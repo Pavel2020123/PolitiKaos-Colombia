@@ -1,8 +1,15 @@
-import { ACTIVE_CHARACTERS, ARCADE_BOSS, CHARACTER_BY_ID } from './data/characters.js';
+import { ACTIVE_CHARACTERS, ARCADE_BOSS, CHARACTERS, CHARACTER_BY_ID, preloadCharacterAssets } from './data/characters.js';
 import NetworkManager from './network/NetworkManager.js';
 
 const ROSTER = ACTIVE_CHARACTERS;
 const GRID_COLUMNS = 4;
+const PAGE_SIZE = Math.max(1, Math.ceil(ROSTER.length / 2));
+const PAGE_COUNT = Math.max(1, Math.ceil(ROSTER.length / PAGE_SIZE));
+const CARD_WIDTH = 132;
+const CARD_HEIGHT = 108;
+const CARD_GAP_X = 144;
+const CARD_GAP_Y = 116;
+const MAX_GRID_ROWS = 4;
 
 export default class SelectScene extends Phaser.Scene {
   constructor() {
@@ -19,10 +26,7 @@ export default class SelectScene extends Phaser.Scene {
     this.loadAudioIfMissing('sfx_select', 'assets/audio/sfx_select.mp3');
     this.loadAudioIfMissing('sfx_fight', 'assets/audio/sfx_fight.flac');
 
-    ROSTER.forEach(({ texture, selectionAsset, headTexture, headAsset }) => {
-      if (!this.textures.exists(texture)) this.load.image(texture, selectionAsset);
-      if (!this.textures.exists(headTexture)) this.load.image(headTexture, headAsset);
-    });
+    preloadCharacterAssets(this, CHARACTERS);
   }
 
   create() {
@@ -35,7 +39,10 @@ export default class SelectScene extends Phaser.Scene {
     this.player1 = null;
     this.player2 = null;
     this.cards = [];
+    this.currentPage = 0;
     this.focusedIndex = 0;
+    this.lastAxisDirection = '';
+    this.nextAxisNavigationAt = 0;
     this.ensureFallbackTextures();
     this.drawBackground();
 
@@ -59,8 +66,9 @@ export default class SelectScene extends Phaser.Scene {
     const rivalLabel = this.gameMode === 'VERSUS_2P' || this.isOnline ? 'JUGADOR 2' : 'RIVAL · CPU';
     this.rightPreview = this.createPreviewPanel(1140, 360, rivalLabel, 0xeb3b5a);
 
-    this.focusCursor = this.add.rectangle(0, 0, 136, 148, 0x000000, 0)
+    this.focusCursor = this.add.rectangle(0, 0, CARD_WIDTH + 8, CARD_HEIGHT + 8, 0x000000, 0)
       .setStrokeStyle(4, 0xffdf58, 1)
+      .setDepth(7)
       .setVisible(false);
     this.tweens.add({
       targets: this.focusCursor,
@@ -72,6 +80,13 @@ export default class SelectScene extends Phaser.Scene {
     });
 
     ROSTER.forEach((fighter, index) => this.createRosterCard(fighter, index));
+
+    this.previousPageButton = this.createPageArrow(294, 350, '<', () => this.changePage(-1));
+    this.nextPageButton = this.createPageArrow(986, 350, '>', () => this.changePage(1));
+    this.pageIndicator = this.add.text(640, 589, '', {
+      fontFamily: 'Consolas, monospace', fontSize: '16px', fontStyle: 'bold',
+      color: '#ffd84d', stroke: '#090d17', strokeThickness: 4, letterSpacing: 2
+    }).setOrigin(0.5).setDepth(8);
 
     this.backButton = this.createActionButton(160, 650, 190, 58, '‹ MENÚ', 0x60708c, () => this.goTo('MenuScene'));
     this.resetButton = this.createActionButton(400, 650, 190, 58, 'REINICIAR', 0xa66cff, () => this.resetSelection());
@@ -85,8 +100,30 @@ export default class SelectScene extends Phaser.Scene {
     }
 
     this.setupNavigation();
-    this.focusCharacter(0, false);
+    this.showPage(0, 0, false);
     this.cameras.main.fadeIn(250, 4, 7, 15);
+  }
+
+  update(time) {
+    if (this.transitioning) return;
+    const pad = this.input.gamepad?.getPad(0);
+    if (!pad?.axes?.length) return;
+    const axisX = pad.axes[0]?.getValue() || 0;
+    const axisY = pad.axes[1]?.getValue() || 0;
+    const deadZone = 0.55;
+
+    if (Math.abs(axisX) < deadZone && Math.abs(axisY) < deadZone) {
+      this.lastAxisDirection = '';
+      return;
+    }
+
+    const horizontal = Math.abs(axisX) >= Math.abs(axisY) ? Math.sign(axisX) : 0;
+    const vertical = horizontal === 0 ? Math.sign(axisY) : 0;
+    const direction = `${horizontal}:${vertical}`;
+    if (direction === this.lastAxisDirection && time < this.nextAxisNavigationAt) return;
+    this.lastAxisDirection = direction;
+    this.nextAxisNavigationAt = time + 220;
+    this.moveFocus(horizontal, vertical);
   }
 
   drawBackground() {
@@ -129,8 +166,8 @@ export default class SelectScene extends Phaser.Scene {
 
   ensureFallbackTextures() {
     ROSTER.forEach(fighter => {
-      this.ensureFallbackTexture(fighter.texture, fighter.color);
-      this.ensureFallbackTexture(fighter.headTexture, fighter.color);
+      this.ensureFallbackTexture(fighter.portrait, fighter.color);
+      this.ensureFallbackTexture(fighter.headSprite, fighter.color);
     });
   }
 
@@ -170,7 +207,7 @@ export default class SelectScene extends Phaser.Scene {
       fontFamily: 'Arial', fontSize: '15px', fontStyle: 'bold', color: '#ffffff'
     }).setOrigin(0.5);
     const portraitFrame = this.add.rectangle(0, -37, 194, 304, 0x070b13, 1).setStrokeStyle(3, 0x3a475e, 1);
-    const portrait = this.add.image(0, -37, ROSTER[0].texture).setVisible(false);
+    const portrait = this.add.image(0, -37, ROSTER[0].portrait).setVisible(false);
     const prompt = this.add.text(0, -37, '?', {
       fontFamily: 'Trebuchet MS, Arial', fontSize: '72px', fontStyle: 'bold', color: '#42516a'
     }).setOrigin(0.5);
@@ -187,27 +224,35 @@ export default class SelectScene extends Phaser.Scene {
   }
 
   createRosterCard(fighter, index) {
-    const column = index % GRID_COLUMNS;
-    const row = Math.floor(index / GRID_COLUMNS);
-    const charactersInRow = Math.min(GRID_COLUMNS, ROSTER.length - row * GRID_COLUMNS);
-    const x = 640 + (column - (charactersInRow - 1) / 2) * 140;
-    const y = 195 + row * 145;
+    const page = this.getPageForIndex(index);
+    const pageStart = page * PAGE_SIZE;
+    const pageLength = this.getPageLength(page);
+    const localIndex = index - pageStart;
+    const column = localIndex % GRID_COLUMNS;
+    const row = Math.floor(localIndex / GRID_COLUMNS);
+    const totalRows = Math.ceil(pageLength / GRID_COLUMNS);
+    const charactersInRow = Math.min(GRID_COLUMNS, pageLength - row * GRID_COLUMNS);
+    const x = 640 + (column - (charactersInRow - 1) / 2) * CARD_GAP_X;
+    const firstRowY = 164 + (MAX_GRID_ROWS - totalRows) * (CARD_GAP_Y / 2);
+    const y = firstRowY + row * CARD_GAP_Y;
     const bg = this.add.graphics();
-    const portrait = this.add.image(0, -14, fighter.headTexture);
-    this.scaleToFit(portrait, 114, 90);
-    const name = this.add.text(0, 48, fighter.name.toUpperCase(), {
-      fontFamily: 'Arial', fontSize: fighter.name.length > 10 ? '10px' : '11px',
-      fontStyle: 'bold', color: '#ffffff', align: 'center'
+    const portrait = this.add.image(0, -14, fighter.portrait);
+    this.scaleToFit(portrait, 120, 74);
+    const name = this.add.text(0, 39, fighter.name.toUpperCase(), {
+      fontFamily: 'Arial', fontSize: fighter.name.length > 18 ? '10px' : fighter.name.length > 13 ? '11px' : '13px',
+      fontStyle: 'bold', color: '#ffffff', align: 'center', wordWrap: { width: 124 }
     }).setOrigin(0.5);
-    const badge = this.add.text(0, -65, '', {
-      fontFamily: 'Consolas, monospace', fontSize: '9px', fontStyle: 'bold', color: '#ffffff'
+    const badge = this.add.text(0, -48, '', {
+      fontFamily: 'Consolas, monospace', fontSize: '11px', fontStyle: 'bold', color: '#ffffff'
     }).setOrigin(0.5);
     const card = this.add.container(x, y, [bg, portrait, name, badge]);
-    card.setSize(126, 138);
-    const hitZone = this.add.zone(0, 0, 126, 138).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    card.setSize(CARD_WIDTH, CARD_HEIGHT);
+    const hitZone = this.add.zone(0, 0, CARD_WIDTH, CARD_HEIGHT).setOrigin(0.5).setInteractive({ useHandCursor: true });
     card.add(hitZone);
-    const view = { fighter, index, card, bg, badge, hitZone };
+    const view = { fighter, index, page, card, bg, badge, hitZone };
     this.cards.push(view);
+    card.setVisible(page === this.currentPage);
+    if (page !== this.currentPage) hitZone.disableInteractive();
     this.drawRosterCard(view, false);
 
     hitZone.on('pointerover', () => {
@@ -229,6 +274,46 @@ export default class SelectScene extends Phaser.Scene {
     hitZone.on('pointerup', () => this.selectFighter(fighter));
   }
 
+  createPageArrow(x, y, label, onClick) {
+    const width = 56;
+    const height = 92;
+    const bg = this.add.graphics();
+    const text = this.add.text(0, -2, label, {
+      fontFamily: 'Trebuchet MS, Arial', fontSize: '48px', fontStyle: 'bold', color: '#ffd84d',
+      stroke: '#090d17', strokeThickness: 5
+    }).setOrigin(0.5);
+    const button = this.add.container(x, y, [bg, text]).setDepth(8);
+    const hitZone = this.add.zone(0, 0, width, height).setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    button.add(hitZone);
+
+    const draw = hovered => {
+      bg.clear();
+      bg.fillStyle(hovered ? 0x3b265f : 0x151329, hovered ? 0.98 : 0.9);
+      bg.fillRoundedRect(-width / 2, -height / 2, width, height, 14);
+      bg.lineStyle(hovered ? 4 : 2, hovered ? 0xff70c5 : 0x7652a8, 1);
+      bg.strokeRoundedRect(-width / 2, -height / 2, width, height, 14);
+      text.setColor(hovered ? '#ffffff' : '#ffd84d');
+    };
+    draw(false);
+    hitZone.on('pointerover', () => {
+      draw(true);
+      this.tweens.killTweensOf(button);
+      this.tweens.add({ targets: button, scale: 1.08, duration: 260, yoyo: true, repeat: -1 });
+    });
+    hitZone.on('pointerout', () => {
+      this.tweens.killTweensOf(button);
+      button.setScale(1);
+      draw(false);
+    });
+    hitZone.on('pointerdown', () => button.setScale(0.94));
+    hitZone.on('pointerup', () => {
+      button.setScale(1);
+      onClick();
+    });
+    return button;
+  }
+
   drawRosterCard(view, hovered) {
     const isP1 = this.player1?.id === view.fighter.id;
     const isP2 = this.player2?.id === view.fighter.id;
@@ -236,9 +321,9 @@ export default class SelectScene extends Phaser.Scene {
     const border = isP1 ? 0x45a7ff : isP2 ? 0xff526f : hovered || focused ? view.fighter.color : 0x3f4d64;
     view.bg.clear();
     view.bg.fillStyle(isP1 ? 0x173356 : isP2 ? 0x451b28 : 0x111a2b, 1);
-    view.bg.fillRoundedRect(-63, -69, 126, 138, 9);
+    view.bg.fillRoundedRect(-CARD_WIDTH / 2, -CARD_HEIGHT / 2, CARD_WIDTH, CARD_HEIGHT, 8);
     view.bg.lineStyle(isP1 || isP2 || focused ? 4 : 2, border, 1);
-    view.bg.strokeRoundedRect(-63, -69, 126, 138, 9);
+    view.bg.strokeRoundedRect(-CARD_WIDTH / 2, -CARD_HEIGHT / 2, CARD_WIDTH, CARD_HEIGHT, 8);
     view.badge.setText(isP1 && isP2 ? 'P1 · P2' : isP1 ? 'P1' : isP2 ? (this.isOnline || this.gameMode === 'VERSUS_2P' ? 'P2' : 'IA') : '');
     view.badge.setColor(isP1 ? '#69bfff' : '#ff8294');
   }
@@ -266,6 +351,10 @@ export default class SelectScene extends Phaser.Scene {
       KeyW: () => this.moveFocus(0, -1),
       ArrowDown: () => this.moveFocus(0, 1),
       KeyS: () => this.moveFocus(0, 1),
+      KeyQ: () => this.changePage(-1),
+      PageUp: () => this.changePage(-1),
+      KeyE: () => this.changePage(1),
+      PageDown: () => this.changePage(1),
       Enter: () => this.confirmFocusedCharacter(),
       Space: () => this.confirmFocusedCharacter(),
       Escape: () => this.goTo('MenuScene')
@@ -284,38 +373,98 @@ export default class SelectScene extends Phaser.Scene {
       12: () => this.moveFocus(0, -1),
       13: () => this.moveFocus(0, 1),
       14: () => this.moveFocus(-1, 0),
-      15: () => this.moveFocus(1, 0)
+      15: () => this.moveFocus(1, 0),
+      4: () => this.changePage(-1),
+      5: () => this.changePage(1)
     };
     actions[button.index]?.();
   }
 
   moveFocus(horizontal, vertical) {
     if (!ROSTER.length) return;
-    const currentRow = Math.floor(this.focusedIndex / GRID_COLUMNS);
-    const currentColumn = this.focusedIndex % GRID_COLUMNS;
-    let nextIndex = this.focusedIndex;
+    const pageStart = this.currentPage * PAGE_SIZE;
+    const pageLength = this.getPageLength(this.currentPage);
+    const localIndex = this.focusedIndex - pageStart;
+    const currentRow = Math.floor(localIndex / GRID_COLUMNS);
+    const currentColumn = localIndex % GRID_COLUMNS;
 
     if (horizontal !== 0) {
       const rowStart = currentRow * GRID_COLUMNS;
-      const rowLength = Math.min(GRID_COLUMNS, ROSTER.length - rowStart);
-      const nextColumn = Phaser.Math.Wrap(currentColumn + horizontal, 0, rowLength);
-      nextIndex = rowStart + nextColumn;
-    } else if (vertical !== 0) {
-      nextIndex += vertical * GRID_COLUMNS;
-      if (nextIndex >= ROSTER.length) nextIndex = currentColumn;
-      if (nextIndex < 0) {
-        const lastRow = Math.ceil(ROSTER.length / GRID_COLUMNS) - 1;
-        nextIndex = lastRow * GRID_COLUMNS + currentColumn;
-        if (nextIndex >= ROSTER.length) nextIndex -= GRID_COLUMNS;
+      const rowLength = Math.min(GRID_COLUMNS, pageLength - rowStart);
+      const nextColumn = currentColumn + horizontal;
+      if (nextColumn >= 0 && nextColumn < rowLength) {
+        this.focusCharacter(pageStart + rowStart + nextColumn, true);
+        return;
       }
+
+      const nextPage = Phaser.Math.Wrap(this.currentPage + horizontal, 0, PAGE_COUNT);
+      const nextPageStart = nextPage * PAGE_SIZE;
+      const boundaryIndex = horizontal > 0
+        ? nextPageStart
+        : nextPageStart + this.getPageLength(nextPage) - 1;
+      this.showPage(nextPage, boundaryIndex, true);
+      return;
     }
 
-    this.focusCharacter(nextIndex, true);
+    if (vertical !== 0) {
+      const totalRows = Math.ceil(pageLength / GRID_COLUMNS);
+      const nextRow = Phaser.Math.Wrap(currentRow + vertical, 0, totalRows);
+      const nextRowStart = nextRow * GRID_COLUMNS;
+      const nextRowLength = Math.min(GRID_COLUMNS, pageLength - nextRowStart);
+      const nextLocalIndex = nextRowStart + Math.min(currentColumn, nextRowLength - 1);
+      this.focusCharacter(pageStart + nextLocalIndex, true);
+    }
   }
 
-  focusCharacter(index, playSound = true) {
+  getPageForIndex(index) {
+    return Math.min(PAGE_COUNT - 1, Math.floor(index / PAGE_SIZE));
+  }
+
+  getPageLength(page) {
+    const start = page * PAGE_SIZE;
+    return Math.max(0, Math.min(PAGE_SIZE, ROSTER.length - start));
+  }
+
+  changePage(direction) {
+    if (this.transitioning || PAGE_COUNT <= 1) return;
+    const nextPage = Phaser.Math.Wrap(this.currentPage + direction, 0, PAGE_COUNT);
+    const currentLocalIndex = this.focusedIndex - this.currentPage * PAGE_SIZE;
+    const nextPageStart = nextPage * PAGE_SIZE;
+    const nextIndex = nextPageStart + Math.min(currentLocalIndex, this.getPageLength(nextPage) - 1);
+    this.showPage(nextPage, nextIndex, true);
+  }
+
+  showPage(page, focusIndex = null, playSound = true) {
+    if (!ROSTER.length) return;
+    this.currentPage = Phaser.Math.Wrap(page, 0, PAGE_COUNT);
+    const pageStart = this.currentPage * PAGE_SIZE;
+    const pageLength = this.getPageLength(this.currentPage);
+    const safeFocusIndex = focusIndex === null
+      ? pageStart
+      : Phaser.Math.Clamp(focusIndex, pageStart, pageStart + pageLength - 1);
+
+    this.cards.forEach(view => {
+      const isVisible = view.page === this.currentPage;
+      view.card.setVisible(isVisible);
+      if (isVisible) view.hitZone.setInteractive({ useHandCursor: true });
+      else {
+        view.hitZone.disableInteractive();
+        this.tweens.killTweensOf(view.card);
+        view.card.setScale(1);
+      }
+    });
+    this.pageIndicator?.setText(`PÁGINA ${this.currentPage + 1} / ${PAGE_COUNT}`);
+    this.focusCharacter(safeFocusIndex, playSound, true);
+  }
+
+  focusCharacter(index, playSound = true, pageAlreadyVisible = false) {
     if (!ROSTER.length) return;
     this.focusedIndex = Phaser.Math.Wrap(index, 0, ROSTER.length);
+    const targetPage = this.getPageForIndex(this.focusedIndex);
+    if (!pageAlreadyVisible && targetPage !== this.currentPage) {
+      this.showPage(targetPage, this.focusedIndex, playSound);
+      return;
+    }
     const view = this.cards[this.focusedIndex];
     this.focusCursor.setPosition(view.card.x, view.card.y).setVisible(true);
 
@@ -476,7 +625,7 @@ export default class SelectScene extends Phaser.Scene {
   }
 
   updatePreview(panel, fighter, confirmed = false) {
-    panel.portrait.setTexture(fighter.texture).setVisible(true);
+    panel.portrait.setTexture(fighter.portrait).setVisible(true);
     this.scaleToFit(panel.portrait, 188, 298);
     panel.prompt.setVisible(false);
     panel.name.setText(fighter.name.toUpperCase()).setColor('#ffffff');

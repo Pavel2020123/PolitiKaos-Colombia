@@ -1,4 +1,4 @@
-import { ACTIVE_CHARACTERS, CHARACTER_BY_ID } from './data/characters.js';
+import { ACTIVE_CHARACTERS, CHARACTER_BY_ID, preloadCharacterAssets } from './data/characters.js';
 import BattleAudioManager from './audio/BattleAudioManager.js';
 import { STAGES, STAGE_BY_ID, getRandomStage } from '../src/data/stages.js';
 import { formatArcadeTime, saveArcadeRecord } from './data/arcadeRecords.js';
@@ -47,22 +47,11 @@ export default class BattleScene extends Phaser.Scene {
     this.failedTextureKeys = new Set();
     this.load.on('loaderror', file => this.failedTextureKeys.add(file.key));
 
-    ACTIVE_CHARACTERS.forEach(({ texture, selectionAsset, headTexture, headAsset }) => {
-      if (!this.textures.exists(texture)) this.load.image(texture, selectionAsset);
-      if (!this.textures.exists(headTexture)) this.load.image(headTexture, headAsset);
-    });
-    [this.selectionData.player1, this.selectionData.player2].forEach(character => {
-      if (character?.selectionAsset && !this.textures.exists(character.texture)) {
-        this.load.image(character.texture, character.selectionAsset);
-      }
-      if (character?.headAsset && !this.textures.exists(character.headTexture)) {
-        this.load.image(character.headTexture, character.headAsset);
-      }
-    });
-    [...ACTIVE_CHARACTERS, this.selectionData.player1, this.selectionData.player2]
+    const battleCharacters = [...ACTIVE_CHARACTERS, this.selectionData.player1, this.selectionData.player2]
       .filter((character, index, list) => character
-        && list.findIndex(item => item?.id === character.id) === index)
-      .forEach(character => AnimationManager.preloadCharacter(this, character));
+        && list.findIndex(item => item?.id === character.id) === index);
+    preloadCharacterAssets(this, battleCharacters);
+    battleCharacters.forEach(character => AnimationManager.preloadCharacter(this, character));
     this.stageLayerConfigs.forEach(layerConfig => {
       if (layerConfig.image && !this.textures.exists(layerConfig.texture)) {
         this.load.image(layerConfig.texture, layerConfig.image);
@@ -74,6 +63,8 @@ export default class BattleScene extends Phaser.Scene {
   create() {
     this.transitioning = false;
     this.pauseRequested = false;
+    this.roundIntroStarted = false;
+    this.countdownAudioPlayed = false;
     this.gameMode = this.registry.get('gameMode') || 'VS_CPU';
     this.roundActive = true;
     this.controlsLocked = true;
@@ -438,8 +429,8 @@ export default class BattleScene extends Phaser.Scene {
       .filter((character, index, list) => character
         && list.findIndex(item => item?.id === character.id) === index);
     characters.forEach(character => {
-      this.ensureFallbackTexture(character.texture, character.color);
-      this.ensureFallbackTexture(character.headTexture, character.color);
+      this.ensureFallbackTexture(character.portrait, character.color);
+      this.ensureFallbackTexture(character.headSprite, character.color);
     });
   }
 
@@ -719,9 +710,9 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   spawnFighter(character, x, flipX, side) {
-    const textureKey = this.textures.exists(character.headTexture)
-      ? character.headTexture
-      : character.texture;
+    const textureKey = this.textures.exists(character.headSprite)
+      ? character.headSprite
+      : character.portrait;
     const sprite = this.physics.add.sprite(x, 330, textureKey);
     this.scaleToFit(sprite, 190, 250);
     sprite.setFlipX(flipX);
@@ -828,7 +819,10 @@ export default class BattleScene extends Phaser.Scene {
     this.add.circle(x, y, 46, 0x111a2b, 1)
       .setStrokeStyle(4, combatant.character.color || 0x60708c, 1)
       .setDepth(31);
-    const icon = this.add.image(x, y, combatant.character.headTexture).setFlipX(flipX).setDepth(32);
+    const iconTexture = this.textures.exists(combatant.character.headSprite)
+      ? combatant.character.headSprite
+      : combatant.character.portrait;
+    const icon = this.add.image(x, y, iconTexture).setFlipX(flipX).setDepth(32);
     this.scaleToFit(icon, 78, 78);
   }
 
@@ -877,6 +871,11 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   playRoundIntro() {
+    // Esta escena puede reanudarse o recibir varias señales de inicio. La guarda
+    // evita crear timers/tweens duplicados para una misma ronda.
+    if (this.roundIntroStarted) return;
+    this.roundIntroStarted = true;
+
     const roundText = this.add.text(640, 335, 'ROUND 1', {
       fontFamily: 'Trebuchet MS, Arial', fontSize: '78px', fontStyle: 'bold italic',
       color: '#ffffff', stroke: '#141022', strokeThickness: 11
@@ -904,7 +903,7 @@ export default class BattleScene extends Phaser.Scene {
         fontFamily: 'Trebuchet MS, Arial', fontSize: '104px', fontStyle: 'bold italic',
         color: '#ffd23f', stroke: '#eb315b', strokeThickness: 12
       }).setOrigin(0.5).setScale(0.15).setAlpha(0).setDepth(45);
-      this.audioManager.announce('fight');
+      this.playCountdownAudioOnce();
       this.tweens.add({
         targets: fightText,
         scale: 1.2,
@@ -930,6 +929,13 @@ export default class BattleScene extends Phaser.Scene {
       this.combatLog.setText('¡PELEEN!');
       if (!this.isOnline || this.isHost) this.startRoundTimer();
     });
+  }
+
+  playCountdownAudioOnce() {
+    if (this.countdownAudioPlayed || !this.roundActive) return false;
+    this.countdownAudioPlayed = true;
+    this.audioManager?.announce('fight');
+    return true;
   }
 
   updateAudioControls() {
@@ -1639,9 +1645,9 @@ export default class BattleScene extends Phaser.Scene {
 
   createWinnerPresentation(winner) {
     const character = winner.character;
-    const portraitTexture = this.textures.exists(character.headTexture)
-      ? character.headTexture
-      : character.texture;
+    const portraitTexture = this.textures.exists(character.headSprite)
+      ? character.headSprite
+      : character.portrait;
     this.add.circle(430, 360, 92, 0x08101f, 1)
       .setStrokeStyle(5, character.color || 0xffd23f, 1)
       .setDepth(52);
