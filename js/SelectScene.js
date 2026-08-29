@@ -1,4 +1,11 @@
-import { ACTIVE_CHARACTERS, ARCADE_BOSS, CHARACTERS, CHARACTER_BY_ID, preloadCharacterAssets } from './data/characters.js';
+import {
+  ACTIVE_CHARACTERS,
+  ARCADE_BOSS,
+  CHARACTERS,
+  CHARACTER_BY_ID,
+  preloadAnimatedCharacterPreviews,
+  preloadCharacterAssets
+} from './data/characters.js';
 import NetworkManager from './network/NetworkManager.js';
 
 const ROSTER = ACTIVE_CHARACTERS;
@@ -27,6 +34,7 @@ export default class SelectScene extends Phaser.Scene {
     this.loadAudioIfMissing('sfx_fight', 'assets/audio/sfx_fight.flac');
 
     preloadCharacterAssets(this, CHARACTERS);
+    preloadAnimatedCharacterPreviews(this, CHARACTERS);
   }
 
   create() {
@@ -62,9 +70,9 @@ export default class SelectScene extends Phaser.Scene {
       fontFamily: 'Consolas, monospace', fontSize: '14px', fontStyle: 'bold', color: '#69bfff', letterSpacing: 2
     }).setOrigin(0.5);
 
-    this.leftPreview = this.createPreviewPanel(140, 360, 'JUGADOR 1', 0x2f80ed);
+    this.leftPreview = this.createPreviewPanel(140, 360, 'JUGADOR 1', 0x2f80ed, false);
     const rivalLabel = this.gameMode === 'VERSUS_2P' || this.isOnline ? 'JUGADOR 2' : 'RIVAL · CPU';
-    this.rightPreview = this.createPreviewPanel(1140, 360, rivalLabel, 0xeb3b5a);
+    this.rightPreview = this.createPreviewPanel(1140, 360, rivalLabel, 0xeb3b5a, true);
 
     this.focusCursor = this.add.rectangle(0, 0, CARD_WIDTH + 8, CARD_HEIGHT + 8, 0x000000, 0)
       .setStrokeStyle(4, 0xffdf58, 1)
@@ -194,7 +202,7 @@ export default class SelectScene extends Phaser.Scene {
     g.destroy();
   }
 
-  createPreviewPanel(x, y, label, accent) {
+  createPreviewPanel(x, y, label, accent, flipAnimatedPreview = false) {
     const bg = this.add.graphics();
     bg.fillStyle(0x10192a, 0.98);
     bg.fillRoundedRect(-110, -240, 220, 480, 14);
@@ -208,6 +216,7 @@ export default class SelectScene extends Phaser.Scene {
     }).setOrigin(0.5);
     const portraitFrame = this.add.rectangle(0, -37, 194, 304, 0x070b13, 1).setStrokeStyle(3, 0x3a475e, 1);
     const portrait = this.add.image(0, -37, ROSTER[0].portrait).setVisible(false);
+    const animatedPortrait = this.add.sprite(0, -37, ROSTER[0].portrait).setVisible(false);
     const prompt = this.add.text(0, -37, '?', {
       fontFamily: 'Trebuchet MS, Arial', fontSize: '72px', fontStyle: 'bold', color: '#42516a'
     }).setOrigin(0.5);
@@ -219,8 +228,10 @@ export default class SelectScene extends Phaser.Scene {
       fontFamily: 'Consolas, monospace', fontSize: '11px', color: '#65748d'
     }).setOrigin(0.5);
 
-    const container = this.add.container(x, y, [bg, portraitFrame, portrait, prompt, title, name, status]);
-    return { container, portrait, prompt, name, status, accent };
+    const container = this.add.container(x, y, [
+      bg, portraitFrame, portrait, animatedPortrait, prompt, title, name, status
+    ]);
+    return { container, portrait, animatedPortrait, prompt, name, status, accent, flipAnimatedPreview };
   }
 
   createRosterCard(fighter, index) {
@@ -625,11 +636,48 @@ export default class SelectScene extends Phaser.Scene {
   }
 
   updatePreview(panel, fighter, confirmed = false) {
-    panel.portrait.setTexture(fighter.portrait).setVisible(true);
-    this.scaleToFit(panel.portrait, 188, 298);
+    const canAnimate = fighter.isAnimatedPreview
+      && fighter.previewTexture
+      && fighter.spriteSpecs
+      && this.textures.exists(fighter.previewTexture);
+
+    panel.animatedPortrait.stop();
+    panel.animatedPortrait.setVisible(false).setFlipX(false);
+    panel.portrait.setVisible(false);
+
+    if (canAnimate) {
+      const animationKey = this.ensurePreviewAnimation(fighter);
+      panel.animatedPortrait
+        .setTexture(fighter.previewTexture, 0)
+        .setFlipX(panel.flipAnimatedPreview)
+        .setVisible(true);
+      this.scaleToFit(panel.animatedPortrait, 188, 298);
+      if (animationKey) panel.animatedPortrait.play(animationKey);
+    } else {
+      panel.portrait.setTexture(fighter.portrait).setVisible(true).setFlipX(false);
+      this.scaleToFit(panel.portrait, 188, 298);
+    }
+
     panel.prompt.setVisible(false);
     panel.name.setText(fighter.name.toUpperCase()).setColor('#ffffff');
     panel.status.setText(fighter.category.toUpperCase()).setColor(confirmed ? '#5ee69a' : '#ffd84d');
+  }
+
+  ensurePreviewAnimation(fighter) {
+    if (!fighter.isAnimatedPreview || !fighter.spriteSpecs || !fighter.previewTexture) return null;
+    const animationKey = `${fighter.id}_select_preview_idle`;
+    if (!this.anims.exists(animationKey)) {
+      this.anims.create({
+        key: animationKey,
+        frames: this.anims.generateFrameNumbers(fighter.previewTexture, {
+          start: 0,
+          end: fighter.spriteSpecs.totalFrames - 1
+        }),
+        frameRate: fighter.spriteSpecs.fps,
+        repeat: -1
+      });
+    }
+    return animationKey;
   }
 
   scaleToFit(sprite, maxAncho, maxAlto) {

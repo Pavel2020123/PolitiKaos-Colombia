@@ -710,9 +710,10 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   spawnFighter(character, x, flipX, side) {
-    const textureKey = this.textures.exists(character.headSprite)
-      ? character.headSprite
-      : character.portrait;
+    const idleTexture = character.animations?.idle?.texture || character.combatTexture;
+    const textureKey = idleTexture && this.textures.exists(idleTexture)
+      ? idleTexture
+      : this.textures.exists(character.headSprite) ? character.headSprite : character.portrait;
     const sprite = this.physics.add.sprite(x, 330, textureKey);
     this.scaleToFit(sprite, 190, 250);
     sprite.setFlipX(flipX);
@@ -1047,11 +1048,21 @@ export default class BattleScene extends Phaser.Scene {
     const grounded = body.blocked.down || body.touching.down;
     if (!grounded) {
       combatant.playAnimation('jump');
-    } else if (Math.abs(body.velocity.x) > 12) {
+    } else if (Math.abs(body.velocity.x) > 12
+      && (!combatant.character.walkForwardOnly || this.isMovingTowardOpponent(combatant))) {
       combatant.playAnimation('walk');
     } else {
       combatant.playAnimation('idle');
     }
+  }
+
+  isMovingTowardOpponent(combatant) {
+    const opponent = combatant === this.player1 ? this.player2
+      : combatant === this.player2 ? this.player1 : null;
+    if (!opponent?.sprite || !combatant?.sprite?.body) return false;
+    const directionToOpponent = Math.sign(opponent.sprite.x - combatant.sprite.x);
+    const movementDirection = Math.sign(combatant.sprite.body.velocity.x);
+    return directionToOpponent !== 0 && movementDirection === directionToOpponent;
   }
 
   setGuardState(combatant, guarding) {

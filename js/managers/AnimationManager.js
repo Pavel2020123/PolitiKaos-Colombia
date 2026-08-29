@@ -12,6 +12,7 @@ export const STANDARD_ANIMATION_STATES = Object.freeze([
 
 // Esquema esperado en characters.js:
 // spriteSheet: { key, path, frameWidth, frameHeight }
+// spriteSheets: [{ key, path, frameWidth, frameHeight }] para una textura por estado
 // atlas: { key, image, json }
 // animations: { idle: { start: 0, end: 5 }, special: { prefix: 'special_', start: 0, end: 7 } }
 
@@ -32,8 +33,13 @@ const LOCOMOTION_STATES = new Set(['idle', 'walk', 'jump', 'guard']);
 
 export default class AnimationManager {
   static preloadCharacter(scene, character) {
-    const sheet = character?.spriteSheet || character?.spritesheet;
-    if (sheet?.key && (sheet.path || sheet.image) && !scene.textures.exists(sheet.key)) {
+    const legacySheet = character?.spriteSheet || character?.spritesheet;
+    const sheets = [legacySheet, ...(character?.spriteSheets || [])].filter(Boolean);
+    const queuedSheetKeys = new Set();
+    sheets.forEach(sheet => {
+      if (!sheet?.key || !(sheet.path || sheet.image)
+        || queuedSheetKeys.has(sheet.key) || scene.textures.exists(sheet.key)) return;
+      queuedSheetKeys.add(sheet.key);
       scene.load.spritesheet(sheet.key, sheet.path || sheet.image, {
         frameWidth: sheet.frameWidth,
         frameHeight: sheet.frameHeight,
@@ -42,7 +48,7 @@ export default class AnimationManager {
         margin: sheet.margin || 0,
         spacing: sheet.spacing || 0
       });
-    }
+    });
 
     const atlas = character?.atlas;
     if (atlas?.key && (atlas.texturePath || atlas.image) && (atlas.atlasPath || atlas.json)
@@ -58,6 +64,10 @@ export default class AnimationManager {
     this.currentState = null;
     this.lockedUntil = 0;
     this.animationKeys = new Map();
+    this.baseScaleX = 1;
+    this.baseScaleY = 1;
+    this.baseBodyWidth = null;
+    this.baseBodyHeight = null;
     this.registerStandardAnimations();
   }
 
@@ -159,6 +169,10 @@ export default class AnimationManager {
 
   attach(sprite) {
     this.sprite = sprite;
+    this.baseScaleX = Math.abs(sprite.scaleX) || 1;
+    this.baseScaleY = Math.abs(sprite.scaleY) || 1;
+    this.baseBodyWidth = sprite.body?.width || null;
+    this.baseBodyHeight = sprite.body?.height || null;
     sprite.on(Phaser.Animations.Events.ANIMATION_COMPLETE, animation => {
       if (!animation?.key?.startsWith(`${this.character.id}:`)) return;
       const completedState = animation.key.slice(this.character.id.length + 1);
@@ -180,7 +194,20 @@ export default class AnimationManager {
     if (options.lockMs > 0) this.lockedUntil = Math.max(this.lockedUntil, this.scene.time.now + options.lockMs);
     this.currentState = state;
     this.sprite.play(animationKey, options.ignoreIfPlaying !== false);
+    this.applyPresentationScale(state);
     return true;
+  }
+
+  applyPresentationScale(state) {
+    const definition = this.getDefinition(state) || {};
+    const multiplier = Number.isFinite(definition.displayScale) ? definition.displayScale : 1;
+    this.sprite.setScale(this.baseScaleX * multiplier, this.baseScaleY * multiplier);
+
+    if (this.sprite.body && this.baseBodyWidth && this.baseBodyHeight) {
+      const scaleX = Math.max(0.0001, Math.abs(this.sprite.scaleX));
+      const scaleY = Math.max(0.0001, Math.abs(this.sprite.scaleY));
+      this.sprite.body.setSize(this.baseBodyWidth / scaleX, this.baseBodyHeight / scaleY, true);
+    }
   }
 
   hasAnimation(state) {

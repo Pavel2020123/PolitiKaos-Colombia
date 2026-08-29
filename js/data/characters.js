@@ -13,6 +13,16 @@ function createCharacter(config) {
   const headSprite = config.headKey || (config.headFile ? `${config.id}_head` : portrait);
   const portraitAsset = imagePath(config.portraitFile);
   const headSpriteAsset = imagePath(config.headFile || config.portraitFile);
+  const previewSpritesheet = config.previewSpritesheetFile
+    ? imagePath(config.previewSpritesheetFile)
+    : null;
+  const spriteSpecs = config.spriteSpecs ? Object.freeze({ ...config.spriteSpecs }) : null;
+  const spriteSheets = Object.freeze((config.spriteSheets || []).map(sheet => Object.freeze({ ...sheet })));
+  const animations = config.animations
+    ? Object.freeze(Object.fromEntries(
+      Object.entries(config.animations).map(([state, definition]) => [state, Object.freeze({ ...definition })])
+    ))
+    : null;
   return Object.freeze({
     id: config.id,
     name: config.name,
@@ -23,6 +33,15 @@ function createCharacter(config) {
     headSprite,
     portraitAsset,
     headSpriteAsset,
+    portraitUrl: portraitAsset,
+    isAnimatedPreview: config.isAnimatedPreview === true,
+    previewTexture: config.previewTextureKey || `${config.id}_animated_preview`,
+    previewSpritesheet,
+    spriteSpecs,
+    combatTexture: config.combatTexture || null,
+    spriteSheets,
+    animations,
+    walkForwardOnly: config.walkForwardOnly === true,
     // Alias legacy: permiten que escenas antiguas sigan funcionando durante la migración.
     texture: portrait,
     selectionAsset: portraitAsset,
@@ -94,7 +113,35 @@ export const CHARACTERS = Object.freeze([
   createCharacter({ id: 'diomedez', name: 'Diomedez', category: ENTRETENIMIENTO, portraitFile: 'Diomedez.png', color: 0xe35d6a, special: { name: 'Nota Vallenata', damage: 17, range: 245, knockback: 370, cooldown: 630 }, ultimate: { name: 'Concierto Infinito', damage: 31, range: 340, knockback: 515, freezeMs: 700, cooldown: 1160 } }),
   createCharacter({ id: 'el_busetero', name: 'El Busetero', category: COTIDIANIDAD, portraitFile: 'ElBusetero.png', color: 0xf29b38, special: { name: 'Frenazo Sorpresa', damage: 17, range: 230, knockback: 405, cooldown: 640 }, ultimate: { name: 'Ruta Fuera de Servicio', damage: 31, range: 330, knockback: 545, freezeMs: 690, cooldown: 1170 } }),
   createCharacter({ id: 'el_del_billar', name: 'El del Billar', category: COTIDIANIDAD, portraitFile: 'ElDelBillar.png', color: 0x3ebd89, special: { name: 'Carambola Triple', damage: 18, range: 250, knockback: 380, cooldown: 650 }, ultimate: { name: 'Taco Maestro', damage: 32, range: 335, knockback: 520, freezeMs: 710, cooldown: 1180 } }),
-  createCharacter({ id: 'gallina', name: 'Gallina', category: COTIDIANIDAD, portraitFile: 'Gallina.png', color: 0xffcf5a, special: { name: 'Picotazo Criollo', damage: 15, range: 220, knockback: 360, cooldown: 590 }, ultimate: { name: 'Rebelión del Corral', damage: 29, range: 315, knockback: 490, freezeMs: 650, cooldown: 1100 } }),
+  createCharacter({
+    id: 'gallina', name: 'Gallina', category: COTIDIANIDAD,
+    portraitFile: 'Gallina.png', color: 0xffcf5a,
+    isAnimatedPreview: true,
+    previewTextureKey: 'gallina_idle_preview',
+    previewSpritesheetFile: 'gallina_idle_spritesheet.png',
+    spriteSpecs: { frameWidth: 256, frameHeight: 384, columns: 7, rows: 5, totalFrames: 31, fps: 10 },
+    combatTexture: 'gallina_idle_preview',
+    walkForwardOnly: true,
+    spriteSheets: [
+      {
+        key: 'gallina_idle_preview', path: 'assets/images/gallina_idle_spritesheet.png',
+        frameWidth: 256, frameHeight: 384, startFrame: 0, endFrame: 30
+      },
+      {
+        key: 'gallina_walk_forward', path: 'assets/images/gallina_walk.png',
+        frameWidth: 256, frameHeight: 256, startFrame: 0, endFrame: 21
+      }
+    ],
+    animations: {
+      idle: { texture: 'gallina_idle_preview', start: 0, end: 30, frameRate: 10, repeat: -1 },
+      walk: {
+        texture: 'gallina_walk_forward', start: 0, end: 21, frameRate: 10, repeat: -1,
+        displayScale: 1.5
+      }
+    },
+    special: { name: 'Picotazo Criollo', damage: 15, range: 220, knockback: 360, cooldown: 590 },
+    ultimate: { name: 'Rebelión del Corral', damage: 29, range: 315, knockback: 490, freezeMs: 650, cooldown: 1100 }
+  }),
   createCharacter({ id: 'gota_a_gota', name: 'Gota a Gota', category: COTIDIANIDAD, portraitFile: 'GotaAGota.png', color: 0x66b7a5, special: { name: 'Interés Diario', damage: 17, range: 235, knockback: 365, cooldown: 620 }, ultimate: { name: 'Cobro Acumulado', damage: 32, range: 325, knockback: 530, freezeMs: 740, cooldown: 1200 } }),
   createCharacter({ id: 'la_abuela', name: 'La Abuela', category: COTIDIANIDAD, portraitFile: 'LaAbuela.png', color: 0xc98acb, special: { name: 'Chancla Teledirigida', damage: 18, range: 270, knockback: 380, cooldown: 640 }, ultimate: { name: 'Aquí Mando Yo', damage: 33, range: 345, knockback: 540, freezeMs: 750, cooldown: 1200 } }),
   createCharacter({ id: 'la_marimonda', name: 'La Marimonda', category: ENTRETENIMIENTO, portraitFile: 'LaMarimonda.png', color: 0xff5cb8, special: { name: 'Mueca Carnavalera', damage: 16, range: 245, knockback: 360, cooldown: 600 }, ultimate: { name: 'Carnaval Total', damage: 31, range: 350, knockback: 510, freezeMs: 700, cooldown: 1160 } }),
@@ -121,6 +168,26 @@ export function preloadCharacterAssets(scene, characters = CHARACTERS) {
       if (!textureKey || !assetPath || queuedKeys.has(textureKey) || scene.textures.exists(textureKey)) return;
       queuedKeys.add(textureKey);
       scene.load.image(textureKey, assetPath);
+    });
+  });
+}
+
+export function preloadAnimatedCharacterPreviews(scene, characters = CHARACTERS) {
+  const queuedKeys = new Set();
+  characters.forEach(character => {
+    if (!character.isAnimatedPreview
+      || !character.previewTexture
+      || !character.previewSpritesheet
+      || !character.spriteSpecs
+      || queuedKeys.has(character.previewTexture)
+      || scene.textures.exists(character.previewTexture)) return;
+
+    queuedKeys.add(character.previewTexture);
+    scene.load.spritesheet(character.previewTexture, character.previewSpritesheet, {
+      frameWidth: character.spriteSpecs.frameWidth,
+      frameHeight: character.spriteSpecs.frameHeight,
+      startFrame: 0,
+      endFrame: character.spriteSpecs.totalFrames - 1
     });
   });
 }
