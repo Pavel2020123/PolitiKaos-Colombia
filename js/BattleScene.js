@@ -27,6 +27,7 @@ export default class BattleScene extends Phaser.Scene {
       player2: CHARACTER_BY_ID[selectedP2Key] || data?.player2 || fallbackP2
     };
     this.gameMode = this.registry.get('gameMode') || 'VS_CPU';
+    this.isTraining = this.gameMode === 'TRAINING';
     this.isOnline = this.gameMode === 'ONLINE' || this.registry.get('isOnline') === true;
     this.isHost = this.isOnline && NetworkManager.isHost;
     this.onlinePlayerNumber = NetworkManager.playerNumber;
@@ -66,6 +67,7 @@ export default class BattleScene extends Phaser.Scene {
     this.roundIntroStarted = false;
     this.countdownAudioPlayed = false;
     this.gameMode = this.registry.get('gameMode') || 'VS_CPU';
+    this.isTraining = this.gameMode === 'TRAINING';
     this.roundActive = true;
     this.controlsLocked = true;
     this.koSequenceActive = false;
@@ -88,8 +90,12 @@ export default class BattleScene extends Phaser.Scene {
     this.drawArena();
     this.createGround();
 
-    this.player1 = this.spawnFighter(this.selectionData.player1, 300, false, 'P1');
-    this.player2 = this.spawnFighter(this.selectionData.player2, 980, true, 'P2');
+    this.player1 = this.spawnFighter(this.selectionData.player1, this.isTraining ? 230 : 300, false, 'P1');
+    this.player2 = this.spawnFighter(this.selectionData.player2, this.isTraining ? 700 : 980, true, 'P2');
+    if (this.isTraining) {
+      this.player1.super = 100;
+      this.player2.sprite.setDragX(720);
+    }
     this.isCpuMode = this.resolveCpuMode();
     this.cpuState = {
       nextDecisionAt: 0,
@@ -103,6 +109,7 @@ export default class BattleScene extends Phaser.Scene {
 
     this.createDebugOverlay();
     this.createHud();
+    if (this.isTraining) this.createTrainingPanel();
     this.setupControls();
     if (this.isOnline) this.setupOnlineBattle();
     this.audioManager = new BattleAudioManager(this, this.stage.musicTrack);
@@ -139,6 +146,11 @@ export default class BattleScene extends Phaser.Scene {
     }
     if (!this.roundActive) return;
 
+    if (this.isTraining && this.player1.super !== 100) {
+      this.player1.super = 100;
+      this.updateHud();
+    }
+
     const pad1State = this.readGamepadState(this.input.gamepad?.getPad(0), 0);
     const pad2State = this.readGamepadState(this.input.gamepad?.getPad(1), 1);
 
@@ -151,7 +163,10 @@ export default class BattleScene extends Phaser.Scene {
     }
 
     this.updateMovement(this.player1, this.controls.p1, pad1State);
-    if (this.isCpuMode) {
+    if (this.isTraining) {
+      this.setGuardState(this.player2, false);
+      this.syncNamePlate(this.player2);
+    } else if (this.isCpuMode) {
       this.updateCpuController();
     } else {
       this.updateMovement(this.player2, this.controls.p2, pad2State);
@@ -159,7 +174,7 @@ export default class BattleScene extends Phaser.Scene {
     this.updateFacingDirections();
     this.updateKeyboardAttacks();
     this.updateGamepadAttacks(this.player1, this.player2, pad1State);
-    if (!this.isCpuMode) this.updateGamepadAttacks(this.player2, this.player1, pad2State);
+    if (!this.isCpuMode && !this.isTraining) this.updateGamepadAttacks(this.player2, this.player1, pad2State);
   }
 
   setupOnlineBattle() {
@@ -237,6 +252,7 @@ export default class BattleScene extends Phaser.Scene {
       combatant.sprite.setVelocity(0, 0);
       return;
     }
+    if (combatant.animationManager.isMovementLocked()) return;
     this.setGuardState(combatant, input.guard);
     if (input.guard) {
       combatant.sprite.setVelocityX(0);
@@ -321,7 +337,7 @@ export default class BattleScene extends Phaser.Scene {
     const direction = attacker.sprite.flipX ? -1 : 1;
     const effect = this.add.rectangle(
       attacker.sprite.x + direction * 85,
-      attacker.sprite.y,
+      this.getVisualCenterY(attacker),
       125,
       72,
       payload.hit ? 0xffd23f : 0x6e86ab,
@@ -416,7 +432,7 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   resolveCpuMode() {
-    if (this.isOnline) return false;
+    if (this.isOnline || this.isTraining) return false;
     const configuredMode = this.registry.get('isCpuMode');
     const secondGamepadConnected = Boolean(this.input.gamepad?.getPad(1)?.connected);
     if (configuredMode === true) return true;
@@ -715,6 +731,7 @@ export default class BattleScene extends Phaser.Scene {
       ? idleTexture
       : this.textures.exists(character.headSprite) ? character.headSprite : character.portrait;
     const sprite = this.physics.add.sprite(x, 330, textureKey);
+    sprite.setOrigin(character.combatOrigin?.x ?? 0.5, character.combatOrigin?.y ?? 0.5);
     this.scaleToFit(sprite, 190, 250);
     sprite.setFlipX(flipX);
     sprite.setCollideWorldBounds(true);
@@ -723,6 +740,20 @@ export default class BattleScene extends Phaser.Scene {
     sprite.body.setAllowGravity(true);
     sprite.body.setMaxVelocity(MOVE_SPEED, 950);
     sprite.body.setSize(sprite.width * 0.68, sprite.height * 0.9, true);
+
+    // Las hojas de Gallina mezclan celdas de anchuras y escalas muy distintas.
+    // El sprite físico conserva siempre el frame idle; las animaciones se dibujan
+    // en un sprite visual separado para que sus escalas no alteren suelo/hurtbox.
+    const usesDetachedVisual = character.combatOrigin?.y >= 0.9 && character.spriteSheets?.length > 1;
+    const visualSprite = usesDetachedVisual
+      ? this.add.sprite(x, 330, textureKey).setDepth(10)
+      : sprite;
+    if (usesDetachedVisual) {
+      visualSprite.setOrigin(character.combatOrigin.x, character.combatOrigin.y);
+      this.scaleToFit(visualSprite, 190, 250);
+      visualSprite.setFlipX(flipX);
+      sprite.setVisible(false);
+    }
 
     const namePlate = this.add.text(x, 0, character.name.toUpperCase(), {
       fontFamily: 'Trebuchet MS, Arial',
@@ -737,17 +768,18 @@ export default class BattleScene extends Phaser.Scene {
     const guardShield = this.add.ellipse(
       x,
       sprite.y,
-      sprite.displayWidth + 34,
-      sprite.displayHeight + 24,
+      visualSprite.displayWidth + 34,
+      visualSprite.displayHeight + 24,
       0x4da3ff,
       0.12
     ).setStrokeStyle(5, 0x78c6ff, 0.92).setVisible(false).setDepth(11);
 
-    const animationManager = new AnimationManager(this, character).attach(sprite);
+    const animationManager = new AnimationManager(this, character).attach(visualSprite);
     const combatant = {
       side,
       character,
       sprite,
+      visualSprite,
       namePlate,
       guardShield,
       health: 100,
@@ -756,8 +788,15 @@ export default class BattleScene extends Phaser.Scene {
       lastComboHitAt: Number.NEGATIVE_INFINITY,
       comboText: null,
       isGuarding: false,
+      guardActiveAt: 0,
       frozenUntil: 0,
       nextAttackAt: 0,
+      attackSequenceId: 0,
+      specialCancelUntil: 0,
+      wasGrounded: null,
+      basicChainStep: 0,
+      basicChainUntil: 0,
+      basicChainAwaitingHit: false,
       animationManager,
       playAnimation: (state, options = {}) => animationManager.playAnimation(state, options)
     };
@@ -786,14 +825,16 @@ export default class BattleScene extends Phaser.Scene {
       fontFamily: 'Consolas, monospace', fontSize: '10px', fontStyle: 'bold', color: '#c79cff'
     }).setOrigin(1, 0).setDepth(33);
 
-    this.timerText = this.add.text(640, 55, '99', {
+    this.timerText = this.add.text(640, 55, this.isTraining ? '∞' : '99', {
       fontFamily: 'Consolas, monospace', fontSize: '52px', fontStyle: 'bold', color: '#ffd84d',
       stroke: '#080b12', strokeThickness: 7
     }).setOrigin(0.5).setDepth(34);
-    this.add.text(640, 93, 'ROUND 1', {
+    this.add.text(640, 93, this.isTraining ? 'TRAINING' : 'ROUND 1', {
       fontFamily: 'Consolas, monospace', fontSize: '10px', fontStyle: 'bold', color: '#9eb0c9', letterSpacing: 3
     }).setOrigin(0.5).setDepth(34);
-    this.add.text(640, 113, this.isOnline ? `ONLINE · ${this.isHost ? 'HOST P1' : 'GUEST P2'}` : this.isCpuMode ? 'VS CPU' : '2 JUGADORES', {
+    this.add.text(640, 113, this.isTraining
+      ? 'PRÁCTICA LIBRE'
+      : this.isOnline ? `ONLINE · ${this.isHost ? 'HOST P1' : 'GUEST P2'}` : this.isCpuMode ? 'VS CPU' : '2 JUGADORES', {
       fontFamily: 'Consolas, monospace', fontSize: '9px', fontStyle: 'bold',
       color: this.isOnline ? '#5eff9d' : this.isCpuMode ? '#ff8294' : '#69bfff', letterSpacing: 2
     }).setOrigin(0.5).setDepth(34);
@@ -812,8 +853,59 @@ export default class BattleScene extends Phaser.Scene {
     this.audioStatusText = this.add.text(640, 694, 'M: SILENCIAR · +/-: VOLUMEN', {
       fontFamily: 'Consolas, monospace', fontSize: '10px', fontStyle: 'bold', color: '#b8c7df'
     }).setOrigin(0.5, 1).setDepth(30);
+    if (this.player1.character.id === 'gallina' || this.player2.character.id === 'gallina') {
+      this.add.text(640, 674, 'COMBO GALLINA  P1: J · J · J   |   P2: I/NUM1 ×3   |   MANDO: A ×3', {
+        fontFamily: 'Consolas, monospace', fontSize: '11px', fontStyle: 'bold',
+        color: '#ffd85a', stroke: '#080b12', strokeThickness: 4
+      }).setOrigin(0.5, 1).setDepth(31);
+    }
 
     this.updateHud();
+  }
+
+  createTrainingPanel() {
+    const character = this.player1.character;
+    const gallinaMoves = character.id === 'gallina'
+      ? [
+        'J  Jab de Ala',
+        'J · J · J  Jab → Picotazo → Rodillazo',
+        `K  ${character.special.name} (30% SÚPER)`,
+        `K EN EL AIRE  ${character.special2?.name || character.special.name}`,
+        `L  ${character.ultimate.name} (100% SÚPER)`
+      ]
+      : [
+        'J  Ataque básico',
+        `K  ${character.special.name} (30% SÚPER)`,
+        `L  ${character.ultimate.name} (100% SÚPER)`
+      ];
+    const panel = this.add.graphics().setDepth(37);
+    panel.fillStyle(0x07101f, 0.9);
+    panel.fillRoundedRect(850, 170, 405, 430, 16);
+    panel.lineStyle(4, character.color || 0xffa64d, 0.95);
+    panel.strokeRoundedRect(850, 170, 405, 430, 16);
+    this.add.text(1052, 196, `ENTRENAMIENTO · ${character.name.toUpperCase()}`, {
+      fontFamily: 'Trebuchet MS, Arial', fontSize: '21px', fontStyle: 'bold', color: '#ffd84d',
+      stroke: '#080b12', strokeThickness: 5
+    }).setOrigin(0.5).setDepth(38);
+    this.add.text(878, 238,
+      [
+        'MOVIMIENTO Y DEFENSA',
+        'A / D     Caminar',
+        'W         Saltar',
+        'S         Guardia',
+        '',
+        'ATAQUES',
+        ...gallinaMoves,
+        '',
+        'SÚPER: ∞  SIEMPRE AL 100%',
+        'El muñeco recupera su vida automáticamente.'
+      ].join('\n'), {
+        fontFamily: 'Consolas, monospace', fontSize: '14px', color: '#e7f1ff',
+        lineSpacing: 7, wordWrap: { width: 350, useAdvancedWrap: true }
+      }).setDepth(38);
+    this.add.text(1052, 575, 'ESC: PAUSA / SALIR', {
+      fontFamily: 'Consolas, monospace', fontSize: '11px', fontStyle: 'bold', color: '#8fb2dd'
+    }).setOrigin(0.5).setDepth(38);
   }
 
   createHudPortrait(combatant, x, y, flipX) {
@@ -877,7 +969,7 @@ export default class BattleScene extends Phaser.Scene {
     if (this.roundIntroStarted) return;
     this.roundIntroStarted = true;
 
-    const roundText = this.add.text(640, 335, 'ROUND 1', {
+    const roundText = this.add.text(640, 335, this.isTraining ? 'ENTRENAMIENTO' : 'ROUND 1', {
       fontFamily: 'Trebuchet MS, Arial', fontSize: '78px', fontStyle: 'bold italic',
       color: '#ffffff', stroke: '#141022', strokeThickness: 11
     }).setOrigin(0.5).setScale(0.2).setAlpha(0).setDepth(45);
@@ -900,7 +992,7 @@ export default class BattleScene extends Phaser.Scene {
     });
 
     this.time.delayedCall(900, () => {
-      const fightText = this.add.text(640, 335, 'FIGHT!', {
+      const fightText = this.add.text(640, 335, this.isTraining ? '¡PRACTICA!' : 'FIGHT!', {
         fontFamily: 'Trebuchet MS, Arial', fontSize: '104px', fontStyle: 'bold italic',
         color: '#ffd23f', stroke: '#eb315b', strokeThickness: 12
       }).setOrigin(0.5).setScale(0.15).setAlpha(0).setDepth(45);
@@ -927,8 +1019,8 @@ export default class BattleScene extends Phaser.Scene {
       if (!this.roundActive) return;
       this.controlsLocked = false;
       this.roundStartedAt = this.time.now;
-      this.combatLog.setText('¡PELEEN!');
-      if (!this.isOnline || this.isHost) this.startRoundTimer();
+      this.combatLog.setText(this.isTraining ? 'PRUEBA MOVIMIENTOS, COMBOS Y ESPECIALES' : '¡PELEEN!');
+      if (!this.isTraining && (!this.isOnline || this.isHost)) this.startRoundTimer();
     });
   }
 
@@ -1005,6 +1097,10 @@ export default class BattleScene extends Phaser.Scene {
       this.syncNamePlate(combatant);
       return;
     }
+    if (combatant.animationManager.isMovementLocked()) {
+      this.syncNamePlate(combatant);
+      return;
+    }
     const guarding = controls.guard.isDown || padState.guard;
     this.setGuardState(combatant, guarding);
     if (guarding) {
@@ -1020,18 +1116,40 @@ export default class BattleScene extends Phaser.Scene {
     const keyboardJump = Phaser.Input.Keyboard.JustDown(controls.jump);
     if (canJump && (keyboardJump || padState.jump)) {
       combatant.sprite.setVelocityY(-JUMP_SPEED);
+      this.audioManager?.playSfx('jump');
     }
 
     this.syncNamePlate(combatant);
   }
 
   syncNamePlate(combatant) {
+    const visualSprite = this.getRenderSprite(combatant);
+    if (visualSprite !== combatant.sprite) {
+      visualSprite.setPosition(combatant.sprite.x, combatant.sprite.y);
+      visualSprite.setFlipX(combatant.sprite.flipX);
+    }
     combatant.namePlate.setPosition(
       combatant.sprite.x,
-      combatant.sprite.y - combatant.sprite.displayHeight / 2 - 24
+      this.getVisualTop(combatant) - 24
     );
-    combatant.guardShield.setPosition(combatant.sprite.x, combatant.sprite.y);
+    combatant.guardShield.setPosition(combatant.sprite.x, this.getVisualCenterY(combatant));
     this.updateFighterAnimation(combatant);
+  }
+
+  getVisualTop(combatant) {
+    const sprite = this.getRenderSprite(combatant);
+    if (!sprite) return 0;
+    return sprite.y - sprite.originY * sprite.displayHeight;
+  }
+
+  getVisualCenterY(combatant) {
+    const sprite = this.getRenderSprite(combatant);
+    if (!sprite) return 0;
+    return this.getVisualTop(combatant) + sprite.displayHeight / 2;
+  }
+
+  getRenderSprite(combatant) {
+    return combatant?.visualSprite || combatant?.sprite;
   }
 
   updateFighterAnimation(combatant) {
@@ -1046,11 +1164,14 @@ export default class BattleScene extends Phaser.Scene {
       return;
     }
     const grounded = body.blocked.down || body.touching.down;
+    if (combatant.wasGrounded === false && grounded) this.audioManager?.playSfx('land');
+    combatant.wasGrounded = grounded;
     if (!grounded) {
       combatant.playAnimation('jump');
-    } else if (Math.abs(body.velocity.x) > 12
-      && (!combatant.character.walkForwardOnly || this.isMovingTowardOpponent(combatant))) {
-      combatant.playAnimation('walk');
+    } else if (Math.abs(body.velocity.x) > 12) {
+      const movingForward = this.isMovingTowardOpponent(combatant);
+      const state = movingForward ? 'walk' : 'walk_back';
+      if (!combatant.playAnimation(state)) combatant.playAnimation(movingForward ? 'walk' : 'idle');
     } else {
       combatant.playAnimation('idle');
     }
@@ -1070,6 +1191,12 @@ export default class BattleScene extends Phaser.Scene {
       && this.time.now >= combatant.frozenUntil);
     if (combatant.isGuarding === nextState) return;
     combatant.isGuarding = nextState;
+    const guardDefinition = combatant.character.animations?.guard;
+    const defensiveFrame = guardDefinition?.defensiveFrame;
+    const guardStartupMs = Number.isInteger(defensiveFrame)
+      ? Math.round(defensiveFrame / (guardDefinition.frameRate || 10) * 1000)
+      : 0;
+    combatant.guardActiveAt = nextState ? this.time.now + guardStartupMs : 0;
     combatant.guardShield.setVisible(nextState).setScale(1).setAlpha(nextState ? 0.9 : 0);
     if (nextState) combatant.playAnimation('guard', { force: true });
     else this.updateFighterAnimation(combatant);
@@ -1078,6 +1205,8 @@ export default class BattleScene extends Phaser.Scene {
   updateFacingDirections() {
     this.player1.sprite.setFlipX(this.player2.sprite.x < this.player1.sprite.x);
     this.player2.sprite.setFlipX(this.player1.sprite.x < this.player2.sprite.x);
+    this.getRenderSprite(this.player1).setFlipX(this.player1.sprite.flipX);
+    this.getRenderSprite(this.player2).setFlipX(this.player2.sprite.flipX);
   }
 
   updateCpuController() {
@@ -1088,6 +1217,10 @@ export default class BattleScene extends Phaser.Scene {
     if (now < cpu.frozenUntil) {
       this.setGuardState(cpu, false);
       cpu.sprite.setVelocity(0, 0);
+      this.syncNamePlate(cpu);
+      return;
+    }
+    if (cpu.animationManager.isMovementLocked(now)) {
       this.syncNamePlate(cpu);
       return;
     }
@@ -1152,15 +1285,15 @@ export default class BattleScene extends Phaser.Scene {
       this.performUltimateAttack(this.player1, this.player2);
     }
 
-    if (!this.isCpuMode && (Phaser.Input.Keyboard.JustDown(this.controls.p2.basic)
+    if (!this.isCpuMode && !this.isTraining && (Phaser.Input.Keyboard.JustDown(this.controls.p2.basic)
       || Phaser.Input.Keyboard.JustDown(this.controls.p2.basicNumpad))) {
       this.performBasicAttack(this.player2, this.player1);
     }
-    if (!this.isCpuMode && (Phaser.Input.Keyboard.JustDown(this.controls.p2.special)
+    if (!this.isCpuMode && !this.isTraining && (Phaser.Input.Keyboard.JustDown(this.controls.p2.special)
       || Phaser.Input.Keyboard.JustDown(this.controls.p2.specialNumpad))) {
       this.performSpecialAttack(this.player2, this.player1);
     }
-    if (!this.isCpuMode && (Phaser.Input.Keyboard.JustDown(this.controls.p2.ulti)
+    if (!this.isCpuMode && !this.isTraining && (Phaser.Input.Keyboard.JustDown(this.controls.p2.ulti)
       || Phaser.Input.Keyboard.JustDown(this.controls.p2.ultiNumpad))) {
       this.performUltimateAttack(this.player2, this.player1);
     }
@@ -1206,6 +1339,9 @@ export default class BattleScene extends Phaser.Scene {
   }
 
   performBasicAttack(attacker, target) {
+    if (attacker.character.id === 'gallina') {
+      return this.performGallinaBasicChain(attacker, target);
+    }
     return this.performAttack(attacker, target, {
       name: 'Golpe básico',
       damage: 10,
@@ -1218,8 +1354,42 @@ export default class BattleScene extends Phaser.Scene {
     });
   }
 
+  performGallinaBasicChain(attacker, target) {
+    if (attacker.basicChainAwaitingHit) return false;
+    if (this.time.now > attacker.basicChainUntil) attacker.basicChainStep = 0;
+
+    const chain = [
+      {
+        name: 'Jab de Ala', damage: 8, range: 185, knockback: 205, cooldown: 330,
+        animationState: 'attack_light', superOnHit: 10, comboChainNextStep: 1
+      },
+      {
+        name: 'Picotazo', damage: 10, range: 205, knockback: 285, cooldown: 390,
+        animationState: 'attack_heavy', superOnHit: 12, comboChainNextStep: 2
+      },
+      {
+        name: 'Rodillazo de Corral', damage: 16, range: 220, knockback: 440, cooldown: 540,
+        animationState: 'heavy_kick', superOnHit: 20, comboChainNextStep: null
+      }
+    ];
+    const step = Phaser.Math.Clamp(attacker.basicChainStep || 0, 0, chain.length - 1);
+    const activated = this.performAttack(attacker, target, {
+      ...chain[step],
+      type: 'basic',
+      comboChain: true,
+      comboChainStep: step
+    });
+    if (activated && step > 0) {
+      this.combatLog.setText(`GALLINA · CADENA ${step + 1}/3: ${chain[step].name}`);
+    }
+    return activated;
+  }
+
   performSpecialAttack(attacker, target) {
-    const special = attacker.character.special;
+    const grounded = attacker.sprite.body.blocked.down || attacker.sprite.body.touching.down;
+    const special = !grounded && attacker.character.special2
+      ? attacker.character.special2
+      : attacker.character.special;
     if (!special) {
       return this.performAttack(attacker, target, {
         name: 'Patada fuerte',
@@ -1242,7 +1412,9 @@ export default class BattleScene extends Phaser.Scene {
       animationState: special.animationState || 'special'
     });
     if (activated) {
-      attacker.super = Phaser.Math.Clamp(attacker.super - 30, 0, 100);
+      attacker.super = this.isTraining && attacker === this.player1
+        ? 100
+        : Phaser.Math.Clamp(attacker.super - 30, 0, 100);
       this.updateHud();
     }
     return activated;
@@ -1265,32 +1437,86 @@ export default class BattleScene extends Phaser.Scene {
       animationState: ultimate.animationState || 'special'
     });
     if (activated) {
-      attacker.super = 0;
+      attacker.super = this.isTraining && attacker === this.player1 ? 100 : 0;
       this.updateHud();
     }
     return activated;
   }
 
   performAttack(attacker, target, attack) {
-    if (!this.roundActive || attacker.isGuarding || this.time.now < attacker.nextAttackAt
+    const specialCancel = attack.type === 'special' && this.time.now <= attacker.specialCancelUntil;
+    const basicChainCancel = attack.comboChain === true
+      && attack.comboChainStep === attacker.basicChainStep
+      && this.time.now <= attacker.basicChainUntil;
+    if (!this.roundActive || attacker.isGuarding
+      || (!specialCancel && !basicChainCancel && this.time.now < attacker.nextAttackAt)
       || this.time.now < attacker.frozenUntil) {
       return false;
     }
-    attacker.nextAttackAt = this.time.now + attack.cooldown;
-    attacker.playAnimation(attack.animationState || 'attack_light', {
+
+    const animationState = attack.animationState || 'attack_light';
+    const definition = attacker.character.animations?.[animationState] || {};
+    const frameRate = definition.frameRate || 12;
+    const frameCount = Array.isArray(definition.frames)
+      ? definition.frames.length
+      : Math.max(1, (definition.end ?? 0) - (definition.start ?? 0) + 1);
+    const recoveryMs = Math.max(attack.cooldown || 360, Math.ceil(frameCount / frameRate * 1000));
+    const configuredActiveFrames = definition.activeFrames || attack.activeFrames || [0];
+    const activeFrames = [...new Set(configuredActiveFrames)]
+      .filter(frame => Number.isInteger(frame) && frame >= 0 && frame < frameCount)
+      .sort((left, right) => left - right);
+    if (!activeFrames.length) activeFrames.push(0);
+    const multiHitFrames = new Set(definition.multiHitFrames || attack.multiHitFrames || []);
+
+    attacker.attackSequenceId += 1;
+    const sequenceId = attacker.attackSequenceId;
+    if (attack.comboChain === true) attacker.basicChainAwaitingHit = true;
+    attacker.specialCancelUntil = 0;
+    attacker.nextAttackAt = this.time.now + recoveryMs;
+    attacker.playAnimation(animationState, {
       force: true,
-      lockMs: Math.max(180, attack.cooldown * 0.78)
+      lockMs: recoveryMs
     });
-    if (attack.type === 'ultimate') this.audioManager.playSfx('ultimate');
+    if (attack.type === 'ultimate') this.audioManager.playAttack(attacker.character, attack);
     this.reactCpuToIncomingAttack(attacker, target);
+
+    const direction = attacker.sprite.flipX ? -1 : 1;
+    const impulseX = attack.impulseX ?? 135;
+    if (Number.isFinite(attack.impulseY)) attacker.sprite.setVelocity(direction * impulseX, attack.impulseY);
+    else attacker.sprite.setVelocityX(direction * impulseX);
+
+    const context = {
+      sequenceId,
+      activeFrames,
+      multiHitFrames,
+      hasHit: false,
+      resolvedHits: 0
+    };
+    activeFrames.forEach((activeFrame, index) => {
+      const delay = Math.round(activeFrame / frameRate * 1000);
+      this.time.delayedCall(delay, () => {
+        this.resolveAttackFrame(attacker, target, attack, context, activeFrame, index);
+      });
+    });
+    return true;
+  }
+
+  resolveAttackFrame(attacker, target, attack, context, activeFrame, activeIndex) {
+    if (!this.roundActive || attacker.attackSequenceId !== context.sequenceId
+      || attacker.health <= 0 || target.health <= 0) return false;
+    const isMultiHitFrame = context.multiHitFrames.has(activeFrame);
+    if (context.hasHit && !isMultiHitFrame) return false;
 
     const direction = attacker.sprite.flipX ? -1 : 1;
     const targetBody = target.sprite.body;
     const hitboxWidth = Math.max(40, attack.range - targetBody.halfWidth);
     const hitboxHeight = Math.max(60, 300 - targetBody.height);
+    const attackerCenterY = attacker.sprite.body?.center?.y
+      ?? (attacker.sprite.y - attacker.sprite.originY * attacker.sprite.displayHeight
+        + attacker.sprite.displayHeight / 2);
     const attackHitbox = new Phaser.Geom.Rectangle(
       direction > 0 ? attacker.sprite.x : attacker.sprite.x - hitboxWidth,
-      attacker.sprite.y - hitboxHeight / 2,
+      attackerCenterY - hitboxHeight / 2,
       hitboxWidth,
       hitboxHeight
     );
@@ -1298,12 +1524,12 @@ export default class BattleScene extends Phaser.Scene {
       rect: attackHitbox,
       attacker,
       type: attack.type,
-      expiresAt: this.time.now + 150
+      expiresAt: this.time.now + 90
     });
     const targetHurtbox = new Phaser.Geom.Rectangle(targetBody.x, targetBody.y, targetBody.width, targetBody.height);
     const targetIsInFront = (target.sprite.x - attacker.sprite.x) * direction >= 0;
     const hit = targetIsInFront && Phaser.Geom.Intersects.RectangleToRectangle(attackHitbox, targetHurtbox);
-    const blocked = hit && target.isGuarding;
+    const blocked = hit && target.isGuarding && this.time.now >= target.guardActiveAt;
     if (this.isOnline && this.isHost) {
       NetworkManager.sendAttack({
         attackerSide: attacker.side,
@@ -1315,7 +1541,7 @@ export default class BattleScene extends Phaser.Scene {
     }
 
     const effectX = attacker.sprite.x + direction * Math.min(attack.range * 0.55, 110);
-    const effect = this.add.rectangle(effectX, attacker.sprite.y, attack.range * 0.7, 72,
+    const effect = this.add.rectangle(effectX, attackerCenterY, attack.range * 0.7, 72,
       hit ? 0xffd23f : 0x6e86ab, 0.28).setDepth(20);
     this.tweens.add({
       targets: effect,
@@ -1325,22 +1551,46 @@ export default class BattleScene extends Phaser.Scene {
       onComplete: () => effect.destroy()
     });
 
-    attacker.sprite.setVelocityX(direction * 135);
     if (!hit) {
-      this.combatLog.setText(`${attacker.character.name}: ${attack.name} fuera de rango.`);
-      return true;
+      if (activeIndex === context.activeFrames.length - 1 && !context.hasHit) {
+        if (attack.comboChain === true) this.resetBasicChain(attacker);
+        this.combatLog.setText(`${attacker.character.name}: ${attack.name} fuera de rango.`);
+      }
+      return false;
     }
 
-    const appliedDamage = blocked ? Number((attack.damage * 0.25).toFixed(2)) : attack.damage;
-    target.health = Phaser.Math.Clamp(target.health - appliedDamage, 0, 100);
+    context.hasHit = true;
+    context.resolvedHits += 1;
+    const hitDivisor = context.multiHitFrames.size > 0 ? context.multiHitFrames.size : 1;
+    const frameDamage = attack.damage / hitDivisor;
+    const appliedDamage = blocked ? Number((frameDamage * 0.25).toFixed(2)) : Number(frameDamage.toFixed(2));
+    const remainingHealth = Phaser.Math.Clamp(target.health - appliedDamage, 0, 100);
+    target.health = this.isTraining && target === this.player2
+      ? Math.max(1, remainingHealth)
+      : remainingHealth;
+    if (!blocked) {
+      target.attackSequenceId += 1;
+      this.resetBasicChain(target);
+    }
     const targetAnimation = target.health <= 0 ? 'ko' : blocked ? 'guard' : 'hurt';
     target.playAnimation(targetAnimation, {
       force: true,
       lockMs: target.health <= 0 ? Number.MAX_SAFE_INTEGER : 220
     });
+    if (!blocked) this.audioManager.playCharacterCue(target.character, targetAnimation);
     this.registerComboHit(attacker, target);
-    attacker.super = Phaser.Math.Clamp(attacker.super + (attack.superOnHit || 0), 0, 100);
-    target.super = Phaser.Math.Clamp(target.super + 12, 0, 100);
+    if (attack.comboChain === true) {
+      attacker.basicChainAwaitingHit = false;
+      if (Number.isInteger(attack.comboChainNextStep)) {
+        attacker.basicChainStep = attack.comboChainNextStep;
+        attacker.basicChainUntil = this.time.now + 650;
+      } else {
+        this.resetBasicChain(attacker);
+      }
+    }
+    if (attack.type === 'basic') attacker.specialCancelUntil = this.time.now + 220;
+    attacker.super = Phaser.Math.Clamp(attacker.super + (attack.superOnHit || 0) / hitDivisor, 0, 100);
+    target.super = Phaser.Math.Clamp(target.super + 12 / hitDivisor, 0, 100);
     if (this.isOnline && this.isHost) {
       NetworkManager.sendHit({
         attackerSide: attacker.side,
@@ -1363,7 +1613,10 @@ export default class BattleScene extends Phaser.Scene {
     this.flashDamage(target, Boolean(attack.freezeMs));
     this.showFloatingDamage(target, appliedDamage, blocked);
     if (blocked) this.showBlockEffect(target);
-    if (attack.type !== 'ultimate') this.audioManager.playSfx(attack.type || 'basic');
+    if (blocked) this.audioManager.playSfx('block');
+    else if (attack.comboChain === true && !Number.isInteger(attack.comboChainNextStep)) {
+      this.audioManager.playSfx('combo');
+    } else if (attack.type !== 'ultimate') this.audioManager.playAttack(attacker.character, attack);
 
     const shake = attack.type === 'ultimate'
       ? { duration: 270, intensity: 0.014 }
@@ -1378,8 +1631,31 @@ export default class BattleScene extends Phaser.Scene {
       : `${attacker.character.name} conecta ${attack.name}: -${appliedDamage}%`);
     this.updateHud();
 
+    if (this.isTraining && target === this.player2) this.scheduleTrainingDummyRecovery(target);
+
     if (target.health <= 0) this.startSlowMotionKo(attacker);
     return true;
+  }
+
+  resetBasicChain(combatant) {
+    if (!combatant) return;
+    combatant.basicChainStep = 0;
+    combatant.basicChainUntil = 0;
+    combatant.basicChainAwaitingHit = false;
+  }
+
+  scheduleTrainingDummyRecovery(dummy) {
+    this.trainingRecoveryEvent?.remove(false);
+    this.trainingRecoveryEvent = this.time.delayedCall(1200, () => {
+      if (!this.roundActive || !dummy?.sprite?.active) return;
+      dummy.health = 100;
+      dummy.frozenUntil = 0;
+      dummy.sprite.body.setAllowGravity(true);
+      this.getRenderSprite(dummy).clearTint();
+      dummy.playAnimation('idle', { force: true });
+      this.updateHud();
+      this.combatLog.setText('MUÑECO RESTAURADO · CONTINÚA PRACTICANDO');
+    });
   }
 
   registerComboHit(attacker, target) {
@@ -1402,7 +1678,7 @@ export default class BattleScene extends Phaser.Scene {
     const label = `${attacker.comboCount} HITS!${isBigCombo ? '\nCOMBO!' : ''}`;
     attacker.comboText = this.add.text(
       Phaser.Math.Clamp(attacker.sprite.x + horizontalOffset, 120, ARENA_WIDTH - 120),
-      Math.max(205, attacker.sprite.y - attacker.sprite.displayHeight / 2),
+      Math.max(205, this.getVisualTop(attacker)),
       label,
       {
         fontFamily: 'Trebuchet MS, Arial', fontSize: isBigCombo ? '38px' : '31px',
@@ -1455,7 +1731,7 @@ export default class BattleScene extends Phaser.Scene {
     }).setOrigin(0.5).setScale(0.2).setAlpha(0).setDepth(48);
     this.tweens.add({ targets: finishText, scale: 1, alpha: 1, duration: 420, ease: 'Back.easeOut' });
     this.cameras.main.zoomTo(1.2, 500, 'Sine.easeInOut', true);
-    this.cameras.main.pan(winner.sprite.x, winner.sprite.y, 500, 'Sine.easeInOut', true);
+    this.cameras.main.pan(winner.sprite.x, this.getVisualCenterY(winner), 500, 'Sine.easeInOut', true);
 
     // Con timeScale 0.2, 300 ms del reloj de escena equivalen a 1.5 s reales.
     this.time.delayedCall(300, () => {
@@ -1477,22 +1753,23 @@ export default class BattleScene extends Phaser.Scene {
     this.time.delayedCall(duration, () => {
       if (!this.roundActive || this.time.now < combatant.frozenUntil) return;
       combatant.sprite.body.setAllowGravity(true);
-      combatant.sprite.clearTint();
+      this.getRenderSprite(combatant).clearTint();
       combatant.sprite.setVelocity(releaseVelocityX, releaseVelocityY);
     });
   }
 
   flashDamage(combatant, returnToFrozenTint) {
-    combatant.sprite.setTintFill(0xff334d);
+    const renderSprite = this.getRenderSprite(combatant);
+    renderSprite.setTintFill(0xff334d);
     this.time.delayedCall(38, () => {
-      if (combatant.sprite.active) combatant.sprite.setTintFill(0xffffff);
+      if (renderSprite.active) renderSprite.setTintFill(0xffffff);
     });
     this.time.delayedCall(92, () => {
-      if (!combatant.sprite.active) return;
+      if (!renderSprite.active) return;
       if (returnToFrozenTint && this.time.now < combatant.frozenUntil) {
-        combatant.sprite.setTint(0xa96bff);
+        renderSprite.setTint(0xa96bff);
       } else {
-        combatant.sprite.clearTint();
+        renderSprite.clearTint();
       }
     });
   }
@@ -1500,7 +1777,7 @@ export default class BattleScene extends Phaser.Scene {
   showFloatingDamage(combatant, damage, blocked = false) {
     const label = this.add.text(
       combatant.sprite.x,
-      combatant.sprite.y - combatant.sprite.displayHeight / 2 - 18,
+      this.getVisualTop(combatant) - 18,
       blocked ? `BLOQUEO  -${damage}` : `-${damage}`,
       {
         fontFamily: 'Trebuchet MS, Arial', fontSize: '30px', fontStyle: 'bold',

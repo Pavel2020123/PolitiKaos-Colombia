@@ -11,6 +11,24 @@ const BATTLE_AUDIO_SOURCES = Object.freeze([
   { key: 'battle_announcer_fight', path: 'assets/audio/sfx_fight.flac' }
 ]);
 
+// Archivos opcionales recomendados. Si aún no existen, playSfx usa síntesis Web Audio.
+// scene.load.audio('battle_hit_basic', 'assets/audio/combat/hit_light.wav');
+// scene.load.audio('battle_hit_special', 'assets/audio/combat/hit_heavy.wav');
+// scene.load.audio('battle_block', 'assets/audio/combat/block.wav');
+// scene.load.audio('battle_jump', 'assets/audio/combat/jump.wav');
+// scene.load.audio('battle_land', 'assets/audio/combat/land.wav');
+// scene.load.audio('battle_combo', 'assets/audio/combat/combo_finish.wav');
+// scene.load.audio('battle_ulti', 'assets/audio/combat/ultimate.wav');
+// Audios opcionales de Gallina; al cargarlos se detectan automáticamente por su key:
+// scene.load.audio('gallina_attack_light', 'assets/audio/characters/gallina/jab.wav');
+// scene.load.audio('gallina_attack_heavy', 'assets/audio/characters/gallina/peck.wav');
+// scene.load.audio('gallina_heavy_kick', 'assets/audio/characters/gallina/heavy_kick.wav');
+// scene.load.audio('gallina_special', 'assets/audio/characters/gallina/special1.wav');
+// scene.load.audio('gallina_special2', 'assets/audio/characters/gallina/special2.wav');
+// scene.load.audio('gallina_ultimate', 'assets/audio/characters/gallina/ultimate.wav');
+// scene.load.audio('gallina_hurt', 'assets/audio/characters/gallina/hurt.wav');
+// scene.load.audio('gallina_ko', 'assets/audio/characters/gallina/ko.wav');
+
 export default class BattleAudioManager {
   static preload(scene, musicTrack = null) {
     BATTLE_AUDIO_SOURCES.forEach(({ key, path }) => {
@@ -62,11 +80,30 @@ export default class BattleAudioManager {
       basic: 'battle_hit_basic',
       special: 'battle_hit_special',
       ultimate: 'battle_ulti',
-      timer: 'battle_timer_tick'
+      timer: 'battle_timer_tick',
+      block: 'battle_block',
+      jump: 'battle_jump',
+      land: 'battle_land',
+      combo: 'battle_combo'
     };
     const cacheKey = cacheKeys[type];
     if (cacheKey && this.playCached(cacheKey, this.settings.sfxVolume)) return;
     this.playSynth(type);
+  }
+
+  playAttack(character, attack) {
+    const animationState = attack?.animationState || attack?.type;
+    const characterKey = character?.id && animationState
+      ? `${character.id}_${animationState}`
+      : null;
+    if (characterKey && this.playCached(characterKey, this.settings.sfxVolume)) return true;
+    this.playSfx(attack?.type || 'basic');
+    return false;
+  }
+
+  playCharacterCue(character, state) {
+    const characterKey = character?.id && state ? `${character.id}_${state}` : null;
+    return Boolean(characterKey && this.playCached(characterKey, this.settings.sfxVolume * 0.9));
   }
 
   announce(type) {
@@ -167,7 +204,11 @@ export default class BattleAudioManager {
       basic: { start: 185, end: 90, duration: 0.09, wave: 'square', gain: 0.12 },
       special: { start: 360, end: 105, duration: 0.16, wave: 'sawtooth', gain: 0.15 },
       ultimate: { start: 105, end: 620, duration: 0.34, wave: 'sawtooth', gain: 0.18 },
-      timer: { start: 880, end: 660, duration: 0.07, wave: 'square', gain: 0.08 }
+      timer: { start: 880, end: 660, duration: 0.07, wave: 'square', gain: 0.08 },
+      block: { start: 520, end: 170, duration: 0.11, wave: 'triangle', gain: 0.13 },
+      jump: { start: 180, end: 430, duration: 0.12, wave: 'square', gain: 0.07 },
+      land: { start: 120, end: 65, duration: 0.1, wave: 'triangle', gain: 0.09 },
+      combo: { start: 240, end: 820, duration: 0.28, wave: 'sawtooth', gain: 0.17 }
     };
     const tone = tones[type] || tones.basic;
     const oscillator = context.createOscillator();

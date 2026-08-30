@@ -7,6 +7,17 @@ export const CHARACTER_CATEGORIES = Object.freeze({
 
 const { ACTUALIDAD, FITNESS, ENTRETENIMIENTO, COTIDIANIDAD } = CHARACTER_CATEGORIES;
 const imagePath = fileName => `assets/images/${fileName}`;
+const freezeAnimationDefinition = definition => Object.freeze({
+  ...definition,
+  frames: Array.isArray(definition.frames) ? Object.freeze([...definition.frames]) : definition.frames,
+  activeFrames: Array.isArray(definition.activeFrames)
+    ? Object.freeze([...definition.activeFrames]) : definition.activeFrames,
+  multiHitFrames: Array.isArray(definition.multiHitFrames)
+    ? Object.freeze([...definition.multiHitFrames]) : definition.multiHitFrames,
+  framePivots: Array.isArray(definition.framePivots)
+    ? Object.freeze(definition.framePivots.map(pivot => Object.freeze({ ...pivot })))
+    : definition.framePivots
+});
 
 function createCharacter(config) {
   const portrait = config.portraitKey || `${config.id}_portrait`;
@@ -20,7 +31,7 @@ function createCharacter(config) {
   const spriteSheets = Object.freeze((config.spriteSheets || []).map(sheet => Object.freeze({ ...sheet })));
   const animations = config.animations
     ? Object.freeze(Object.fromEntries(
-      Object.entries(config.animations).map(([state, definition]) => [state, Object.freeze({ ...definition })])
+      Object.entries(config.animations).map(([state, definition]) => [state, freezeAnimationDefinition(definition)])
     ))
     : null;
   return Object.freeze({
@@ -42,6 +53,7 @@ function createCharacter(config) {
     spriteSheets,
     animations,
     walkForwardOnly: config.walkForwardOnly === true,
+    combatOrigin: Object.freeze({ x: config.combatOrigin?.x ?? 0.5, y: config.combatOrigin?.y ?? 0.5 }),
     // Alias legacy: permiten que escenas antiguas sigan funcionando durante la migración.
     texture: portrait,
     selectionAsset: portraitAsset,
@@ -52,6 +64,7 @@ function createCharacter(config) {
     victoryQuotes: config.victoryQuotes || [`${config.name} se queda con el round y con la última palabra.`],
     arcadeEnding: config.arcadeEnding || `${config.name} ganó Guachafita Strike y convirtió el país en su propia arena arcade.`,
     special: config.special || { name: 'Golpe de Opinión', damage: 16, range: 235, knockback: 365, cooldown: 630 },
+    special2: config.special2 || null,
     ultimate: config.ultimate || { name: 'Guachafita Total', damage: 30, range: 325, knockback: 510, freezeMs: 690, cooldown: 1140 }
   });
 }
@@ -121,7 +134,7 @@ export const CHARACTERS = Object.freeze([
     previewSpritesheetFile: 'gallina_idle_spritesheet.png',
     spriteSpecs: { frameWidth: 256, frameHeight: 384, columns: 7, rows: 5, totalFrames: 31, fps: 10 },
     combatTexture: 'gallina_idle_preview',
-    walkForwardOnly: true,
+    combatOrigin: { x: 0.5, y: 1 },
     spriteSheets: [
       {
         key: 'gallina_idle_preview', path: 'assets/images/gallina_idle_spritesheet.png',
@@ -130,17 +143,145 @@ export const CHARACTERS = Object.freeze([
       {
         key: 'gallina_walk_forward', path: 'assets/images/gallina_walk.png',
         frameWidth: 256, frameHeight: 256, startFrame: 0, endFrame: 21
+      },
+      {
+        key: 'gallina_walk_back', path: 'assets/images/gallina_walk_back.png',
+        frameWidth: 400, frameHeight: 489, startFrame: 0, endFrame: 7
+      },
+      {
+        key: 'gallina_crouch', path: 'assets/images/gallina_crouch.png',
+        frameWidth: 764, frameHeight: 382, startFrame: 0, endFrame: 2
+      },
+      {
+        key: 'gallina_jump', path: 'assets/images/gallina_jump.png',
+        frameWidth: 1146, frameHeight: 382, startFrame: 0, endFrame: 4
+      },
+      {
+        key: 'gallina_jab', path: 'assets/images/gallina_jab.png',
+        frameWidth: 1146, frameHeight: 382, startFrame: 0, endFrame: 3
+      },
+      {
+        key: 'gallina_peck', path: 'assets/images/gallina_peck.png',
+        frameWidth: 1146, frameHeight: 382, startFrame: 0, endFrame: 4
+      },
+      {
+        key: 'gallina_light_kick', path: 'assets/images/gallina_light_kick.png',
+        frameWidth: 1146, frameHeight: 382, startFrame: 0, endFrame: 3
+      },
+      {
+        key: 'gallina_heavy_kick', path: 'assets/images/gallina_heavy_kick.png',
+        frameWidth: 1059, frameHeight: 382, startFrame: 0, endFrame: 4
+      },
+      {
+        key: 'gallina_special1', path: 'assets/images/gallina_special1.png',
+        frameWidth: 573, frameHeight: 382, startFrame: 0, endFrame: 7
+      },
+      {
+        key: 'gallina_special2', path: 'assets/images/gallina_special2.png',
+        frameWidth: 1146, frameHeight: 382, startFrame: 0, endFrame: 7
+      },
+      {
+        key: 'gallina_ultimate', path: 'assets/images/gallina_ultimate.png',
+        frameWidth: 1146, frameHeight: 382, startFrame: 0, endFrame: 11
+      },
+      {
+        key: 'gallina_guard', path: 'assets/images/gallina_guard.png',
+        frameWidth: 573, frameHeight: 382, startFrame: 0, endFrame: 1
+      },
+      {
+        key: 'gallina_hit', path: 'assets/images/gallina_hit.png',
+        frameWidth: 917, frameHeight: 382, startFrame: 0, endFrame: 2
+      },
+      {
+        key: 'gallina_knockdown', path: 'assets/images/gallina_knockdown.png',
+        frameWidth: 1019, frameHeight: 382, startFrame: 0, endFrame: 5
       }
     ],
     animations: {
-      idle: { texture: 'gallina_idle_preview', start: 0, end: 30, frameRate: 10, repeat: -1 },
+      idle: { texture: 'gallina_idle_preview', frames: [0, 2, 4, 6], frameRate: 7, repeat: -1 },
       walk: {
         texture: 'gallina_walk_forward', start: 0, end: 21, frameRate: 10, repeat: -1,
         displayScale: 1.5
+      },
+      walk_back: { texture: 'gallina_walk_back', start: 0, end: 7, frameRate: 10, repeat: -1, displayScale: 0.7853 },
+      crouch: {
+        texture: 'gallina_crouch', frames: [0, 2], frameRate: 10, repeat: 0,
+        holdOnComplete: true, displayScale: 1.0052
+      },
+      jump: {
+        texture: 'gallina_jump', start: 0, end: 4, frameRate: 12, repeat: 0,
+        holdOnComplete: true, displayScale: 1.0052
+      },
+      attack_light: {
+        texture: 'gallina_jab', start: 0, end: 3, frameRate: 12, repeat: 0,
+        activeFrames: [1], displayScale: 1.0052
+      },
+      attack_heavy: {
+        texture: 'gallina_peck', start: 0, end: 4, frameRate: 12, repeat: 0,
+        activeFrames: [2], displayScale: 1.0052
+      },
+      light_kick: {
+        texture: 'gallina_light_kick', start: 0, end: 3, frameRate: 12, repeat: 0,
+        activeFrames: [1], displayScale: 1.0052
+      },
+      heavy_kick: {
+        texture: 'gallina_heavy_kick', start: 0, end: 4, frameRate: 10, repeat: 0,
+        activeFrames: [2], displayScale: 1.0052
+      },
+      special: {
+        texture: 'gallina_special1', start: 0, end: 7, frameRate: 12, repeat: 0,
+        activeFrames: [2, 3, 4, 5], displayScale: 2.55,
+        framePivots: [
+          { x: 0.5236, y: 0.9974 }, { x: 0.5419, y: 0.9948 },
+          { x: 0.5471, y: 1 }, { x: 0.4991, y: 0.9974 },
+          { x: 0.5201, y: 0.9974 }, { x: 0.5026, y: 1 },
+          { x: 0.4887, y: 1 }, { x: 0.4948, y: 1 }
+        ]
+      },
+      special2: {
+        texture: 'gallina_special2', start: 0, end: 7, frameRate: 12, repeat: 0,
+        activeFrames: [3, 4], displayScale: 2.5,
+        framePivots: [
+          { x: 0.4773, y: 0.9921 }, { x: 0.4756, y: 0.9948 },
+          { x: 0.4869, y: 0.7723 }, { x: 0.5175, y: 0.6204 },
+          { x: 0.5729, y: 0.6309 }, { x: 0.5929, y: 0.7356 },
+          { x: 0.7286, y: 0.9974 }, { x: 0.7749, y: 1 }
+        ]
+      },
+      ultimate: {
+        texture: 'gallina_ultimate', start: 0, end: 11, frameRate: 8, repeat: 0,
+        activeFrames: [3, 6, 9], multiHitFrames: [3, 6, 9], displayScale: 1.5,
+        framePivots: [
+          { x: 0.2688, y: 0.9974 }, { x: 0.315, y: 1 },
+          { x: 0.5096, y: 0.9974 }, { x: 0.5602, y: 0.9974 },
+          { x: 0.6784, y: 1 }, { x: 0.7701, y: 1 },
+          { x: 0.8743, y: 0.9974 }, { x: 0.8661, y: 1 },
+          { x: 0.8608, y: 1 }, { x: 0.7901, y: 0.9948 },
+          { x: 0.8355, y: 1 }, { x: 0.8067, y: 1 }
+        ]
+      },
+      guard: {
+        texture: 'gallina_guard', start: 0, end: 1, frameRate: 10, repeat: 0,
+        holdOnComplete: true, defensiveFrame: 1, displayScale: 1.0052
+      },
+      hurt: { texture: 'gallina_hit', start: 0, end: 2, frameRate: 10, repeat: 0, displayScale: 1.0052 },
+      ko: {
+        texture: 'gallina_knockdown', start: 0, end: 5, frameRate: 10, repeat: 0,
+        holdOnComplete: true, displayScale: 1.0052
       }
     },
-    special: { name: 'Picotazo Criollo', damage: 15, range: 220, knockback: 360, cooldown: 590 },
-    ultimate: { name: 'Rebelión del Corral', damage: 29, range: 315, knockback: 490, freezeMs: 650, cooldown: 1100 }
+    special: {
+      name: 'Aleteo Furioso', damage: 16, range: 245, knockback: 390, cooldown: 670,
+      animationState: 'special', impulseX: 210
+    },
+    special2: {
+      name: 'Espolonazo Volador', damage: 18, range: 270, knockback: 430, cooldown: 720,
+      animationState: 'special2', impulseX: 330, impulseY: -180
+    },
+    ultimate: {
+      name: 'Furia Avícola', damage: 30, range: 330, knockback: 520, freezeMs: 650, cooldown: 1150,
+      animationState: 'ultimate'
+    }
   }),
   createCharacter({ id: 'gota_a_gota', name: 'Gota a Gota', category: COTIDIANIDAD, portraitFile: 'GotaAGota.png', color: 0x66b7a5, special: { name: 'Interés Diario', damage: 17, range: 235, knockback: 365, cooldown: 620 }, ultimate: { name: 'Cobro Acumulado', damage: 32, range: 325, knockback: 530, freezeMs: 740, cooldown: 1200 } }),
   createCharacter({ id: 'la_abuela', name: 'La Abuela', category: COTIDIANIDAD, portraitFile: 'LaAbuela.png', color: 0xc98acb, special: { name: 'Chancla Teledirigida', damage: 18, range: 270, knockback: 380, cooldown: 640 }, ultimate: { name: 'Aquí Mando Yo', damage: 33, range: 345, knockback: 540, freezeMs: 750, cooldown: 1200 } }),

@@ -20,7 +20,8 @@ const config = {
   height: GAME_HEIGHT,
   backgroundColor: '#070b16',
   pixelArt: true,
-  antialias: true,
+  antialias: false,
+  roundPixels: true,
   input: {
     gamepad: true
   },

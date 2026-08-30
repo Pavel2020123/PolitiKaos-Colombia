@@ -56,6 +56,8 @@ export default class SelectScene extends Phaser.Scene {
 
     const title = this.gameMode === 'ARCADE'
       ? 'ELIGE TU LUCHADOR · MODO ARCADE'
+      : this.gameMode === 'TRAINING'
+        ? 'ELIGE TU LUCHADOR · ENTRENAMIENTO'
       : this.isOnline ? `SELECCIÓN ONLINE · SALA ${NetworkManager.roomCode || '----'}` : 'ELIGE A TUS LUCHADORES';
     this.add.text(640, 34, title, {
       fontFamily: 'Trebuchet MS, Arial', fontSize: '32px', fontStyle: 'bold', color: '#ffd84d',
@@ -63,6 +65,8 @@ export default class SelectScene extends Phaser.Scene {
     }).setOrigin(0.5);
     const initialGuide = this.gameMode === 'ARCADE'
       ? 'ELIGE P1 · LOS RIVALES SERÁN ASIGNADOS POR LA CPU'
+      : this.gameMode === 'TRAINING'
+        ? 'ELIGE UN PERSONAJE · SÚPER INFINITO · SIN LÍMITE DE TIEMPO'
       : this.isOnline
         ? `ERES P${this.onlinePlayerNumber || '?'} · ELIGE TU LUCHADOR Y ESPERA AL RIVAL`
         : 'FLECHAS / STICK · ENTER / A: JUGADOR 1';
@@ -71,7 +75,9 @@ export default class SelectScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     this.leftPreview = this.createPreviewPanel(140, 360, 'JUGADOR 1', 0x2f80ed, false);
-    const rivalLabel = this.gameMode === 'VERSUS_2P' || this.isOnline ? 'JUGADOR 2' : 'RIVAL · CPU';
+    const rivalLabel = this.gameMode === 'TRAINING'
+      ? 'MUÑECO DE PRÁCTICA'
+      : this.gameMode === 'VERSUS_2P' || this.isOnline ? 'JUGADOR 2' : 'RIVAL · CPU';
     this.rightPreview = this.createPreviewPanel(1140, 360, rivalLabel, 0xeb3b5a, true);
 
     this.focusCursor = this.add.rectangle(0, 0, CARD_WIDTH + 8, CARD_HEIGHT + 8, 0x000000, 0)
@@ -98,7 +104,12 @@ export default class SelectScene extends Phaser.Scene {
 
     this.backButton = this.createActionButton(160, 650, 190, 58, '‹ MENÚ', 0x60708c, () => this.goTo('MenuScene'));
     this.resetButton = this.createActionButton(400, 650, 190, 58, 'REINICIAR', 0xa66cff, () => this.resetSelection());
-    this.fightButton = this.createActionButton(820, 650, 330, 64, '¡A COMBATIR!', 0xffd23f, () => this.startBattle());
+    this.fightButton = this.createActionButton(
+      820, 650, 330, 64,
+      this.gameMode === 'TRAINING' ? '¡A ENTRENAR!' : '¡A COMBATIR!',
+      0xffd23f,
+      () => this.startBattle()
+    );
     this.fightButton.setVisible(false);
     this.fightButton.getData('hitZone').disableInteractive();
     if (this.isOnline) {
@@ -335,7 +346,11 @@ export default class SelectScene extends Phaser.Scene {
     view.bg.fillRoundedRect(-CARD_WIDTH / 2, -CARD_HEIGHT / 2, CARD_WIDTH, CARD_HEIGHT, 8);
     view.bg.lineStyle(isP1 || isP2 || focused ? 4 : 2, border, 1);
     view.bg.strokeRoundedRect(-CARD_WIDTH / 2, -CARD_HEIGHT / 2, CARD_WIDTH, CARD_HEIGHT, 8);
-    view.badge.setText(isP1 && isP2 ? 'P1 · P2' : isP1 ? 'P1' : isP2 ? (this.isOnline || this.gameMode === 'VERSUS_2P' ? 'P2' : 'IA') : '');
+    view.badge.setText(isP1 && isP2
+      ? 'P1 · P2'
+      : isP1 ? 'P1'
+        : isP2 ? (this.gameMode === 'TRAINING' ? 'DUMMY' : this.isOnline || this.gameMode === 'VERSUS_2P' ? 'P2' : 'IA')
+          : '');
     view.badge.setColor(isP1 ? '#69bfff' : '#ff8294');
   }
 
@@ -522,6 +537,10 @@ export default class SelectScene extends Phaser.Scene {
       this.selectArcadePlayer(fighter);
       return;
     }
+    if (this.gameMode === 'TRAINING') {
+      this.selectTrainingPlayer(fighter);
+      return;
+    }
     if (!this.player1) {
       this.player1 = fighter;
       this.playOneShot('sfx_select', 0.9);
@@ -635,6 +654,26 @@ export default class SelectScene extends Phaser.Scene {
     this.cards.forEach(view => this.drawRosterCard(view, false));
   }
 
+  selectTrainingPlayer(fighter) {
+    if (this.player1) {
+      this.guide.setText('PERSONAJE LISTO · ENTER / A PARA ENTRENAR').setColor('#5ee69a');
+      return;
+    }
+    this.player1 = fighter;
+    this.player2 = CHARACTER_BY_ID.colombiano_promedio
+      && CHARACTER_BY_ID.colombiano_promedio.id !== fighter.id
+      ? CHARACTER_BY_ID.colombiano_promedio
+      : ROSTER.find(character => character.id !== fighter.id) || fighter;
+    this.playOneShot('sfx_select', 0.9);
+    this.updatePreview(this.leftPreview, fighter, true);
+    this.updatePreview(this.rightPreview, this.player2, true);
+    this.rightPreview.status.setText('OBJETIVO INMÓVIL · VIDA REGENERATIVA').setColor('#ffb15c');
+    this.guide.setText(`${fighter.name.toUpperCase()} LISTO · ENTER / A PARA ENTRENAR`).setColor('#5ee69a');
+    this.fightButton.setVisible(true);
+    this.fightButton.getData('hitZone').setInteractive({ useHandCursor: true });
+    this.cards.forEach(view => this.drawRosterCard(view, false));
+  }
+
   updatePreview(panel, fighter, confirmed = false) {
     const canAnimate = fighter.isAnimatedPreview
       && fighter.previewTexture
@@ -735,13 +774,16 @@ export default class SelectScene extends Phaser.Scene {
     this.transitioning = true;
     this.registry.set('selectedP1Key', this.player1.id);
     this.registry.set('selectedP2Key', this.player2.id);
-    this.registry.set('isCpuMode', this.gameMode !== 'VERSUS_2P' && !this.isOnline);
+    this.registry.set('isCpuMode', !['VERSUS_2P', 'TRAINING'].includes(this.gameMode) && !this.isOnline);
     const requiresStageSelection = !this.isOnline
       && (this.gameMode === 'VS_CPU' || this.gameMode === 'VERSUS_2P');
     if (!requiresStageSelection) this.stopMenuMusic();
     this.cameras.main.fadeOut(250, 3, 6, 13);
     this.time.delayedCall(260, () => {
-      this.scene.start(requiresStageSelection ? 'StageSelectScene' : 'VersusScene', {
+      const nextScene = this.gameMode === 'TRAINING'
+        ? 'BattleScene'
+        : requiresStageSelection ? 'StageSelectScene' : 'VersusScene';
+      this.scene.start(nextScene, {
         player1Key: this.player1.id,
         player2Key: this.player2.id,
         player1: { ...this.player1 },

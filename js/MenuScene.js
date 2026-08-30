@@ -7,8 +7,9 @@ const MENU_OPTIONS = [
   { title: '1. MODO ARCADE (1P)', subtitle: 'Supera a todo el róster y derrota a Amparo Grisales.', mode: 'ARCADE', accent: 0xffd23f },
   { title: '2. VS CPU (1P)', subtitle: 'Elige luchador y rival para una pelea rápida.', mode: 'VS_CPU', accent: 0xff6b87 },
   { title: '3. VERSUS LOCAL (2P)', subtitle: 'Dos jugadores en el mismo teclado o con mandos.', mode: 'VERSUS_2P', accent: 0x69bfff },
-  { title: '4. MULTIJUGADOR ONLINE', subtitle: 'Crea o únete a una sala privada de cuatro letras.', mode: 'ONLINE', accent: 0x5eff9d },
-  { title: '5. OPCIONES', subtitle: 'Audio y guía completa de controles.', mode: 'OPTIONS', accent: 0xa66cff }
+  { title: '4. ENTRENAMIENTO', subtitle: 'Elige un luchador, consulta sus controles y practica sin límites.', mode: 'TRAINING', accent: 0xffa64d },
+  { title: '5. MULTIJUGADOR ONLINE', subtitle: 'Crea o únete a una sala privada de cuatro letras.', mode: 'ONLINE', accent: 0x5eff9d },
+  { title: '6. OPCIONES', subtitle: 'Audio y guía completa de controles.', mode: 'OPTIONS', accent: 0xa66cff }
 ];
 
 export default class MenuScene extends Phaser.Scene {
@@ -55,7 +56,7 @@ export default class MenuScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     const bestRecord = loadArcadeRecord();
-    this.add.text(640, 220, bestRecord
+    this.add.text(640, 202, bestRecord
       ? `MEJOR TIEMPO ARCADE  ${formatArcadeTime(bestRecord.timeMs)}  ·  ${bestRecord.characterName.toUpperCase()}`
       : 'MEJOR TIEMPO ARCADE  --:--.--  ·  SIN REGISTRO', {
       fontFamily: 'Consolas, monospace', fontSize: '13px', fontStyle: 'bold',
@@ -63,7 +64,7 @@ export default class MenuScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     MENU_OPTIONS.forEach((option, index) => {
-      this.menuButtons.push(this.createMenuButton(640, 263 + index * 76, 620, 62, option, index));
+      this.menuButtons.push(this.createMenuButton(640, 250 + index * 64, 620, 56, option, index));
     });
 
     this.add.text(640, 675, '↑ ↓ NAVEGAR  ·  ENTER / A CONFIRMAR', {
@@ -247,7 +248,7 @@ export default class MenuScene extends Phaser.Scene {
 
   startMode(gameMode) {
     this.registry.set('gameMode', gameMode);
-    this.registry.set('isCpuMode', gameMode !== 'VERSUS_2P' && gameMode !== 'ONLINE');
+    this.registry.set('isCpuMode', !['VERSUS_2P', 'ONLINE', 'TRAINING'].includes(gameMode));
     this.registry.set('isOnline', gameMode === 'ONLINE');
     this.registry.remove('selectedStageId');
     this.registry.remove('selectedStage');
